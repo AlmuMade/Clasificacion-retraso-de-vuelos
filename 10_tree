@@ -1,0 +1,106 @@
+
+# ARBOL DE CLASIFICACION
+
+recipe_tree <- recipe(data = train_data, dep_delay ~ .) %>% 
+  # No seleccionar variables
+  update_role(fl_date, new_role = "date") %>%
+  update_role(arr_delay, new_role = "arr_del") %>%
+  update_role(tail_num, new_role = "tail_num") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Columna others variables poca frecuencia
+  step_other(all_nominal_predictors(), threshold = 0.02) %>%
+  # Eliminar variables sin varianza
+  step_zv(all_predictors()) %>%
+  # Bajomuestreo
+  themis::step_downsample(dep_delay, under_ratio = 1)
+
+
+# Modelo
+decision_tree <- decision_tree(mode = "classification",
+                               tree_depth = tune("depth"),
+                               min_n = tune("minObs"))
+
+decision_tree_rpart <- decision_tree %>% set_engine("rpart")
+
+# Flujo de trabajo
+decision_tree_wf <- workflow() %>% add_recipe(recipe_tree) %>%
+  add_model(decision_tree_rpart)
+
+# Grid
+grid_tree <- expand.grid(minObs = seq((round(0.001* nrow(test_data))),
+                                      (round(0.5* nrow(test_data))),
+                                      l = 5),
+                         depth = c(15, 30))
+grid_tree
+gc()
+
+decision_tree_tune <-
+  decision_tree_wf %>%
+  tune_grid(resamples = val_set_data, grid = grid_tree,
+            metrics = metric_set(accuracy, roc_auc))
+
+# Mejores grid
+mejores_grid_tree <- decision_tree_tune %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean)
+mejores_grid_tree
+
+# Predecir el conjunto test
+modelo_tree <- decision_tree_wf %>%
+  update_model(decision_tree %>% set_args(tree_depth = 15, min_n = 22)) %>%
+  fit(data = train_data)
+
+prob_test_tree <- augment(modelo_tree, test_data) %>%
+  rename(pred_del_dep = .pred_class)
+
+# Matriz de confusión
+conf_mat_test_tree <- prob_test_tree %>%
+  conf_mat(truth = dep_delay, estimate = pred_del_dep)
+conf_mat_test_tree
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_tree <-
+  prob_test_tree %>%
+  multi_metric(truth = dep_delay, estimate = pred_del_dep)
+metrics_test_tree
+
+roc_auc_tree <- roc_auc(prob_test_tree, dep_delay, .pred_FALSE)
+roc_auc_tree
+
+# Curva ROC:
+roc_curve_tree <- prob_test_tree %>%
+  roc_curve(truth = dep_delay, estimate = .pred_FALSE)
+roc_curve_tree %>% autoplot()
+
+# Curva ROC
+ggplot(roc_curve_tree, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") +
+  tema_graficos
+
+# VISUALIZACION ARBOL
+modelo_tree %>%
+  extract_fit_engine() %>%
+  rpart.plot(roundint = FALSE, extra = 4)
+
+# IMPORTANCIA DE LAS VARIABLES
+# Extraemos el ajuste
+fit_tree <- modelo_tree %>%
+  extract_fit_engine()
+
+# En tabla por si queremos hacer otra visualización
+variable_tree <- vi(fit_tree) %>%
+  rename(variable = Variable, importance = Importance)
+
+# Visualizamos
+top_n(variable_tree, 15, importance) %>%
+  mutate(variable = fct_reorder(variable, importance)) %>%
+  ggplot() + aes(x = importance, y = variable) + geom_col(fill = "#0078D2") +
+  scale_x_continuous(limit = c(0, 500), breaks = seq(0, 500, 100)) +
+  labs(y = "", x = "\nVariables más utilizadas") + guides(fill = FALSE) +
+  tema_graficos
