@@ -1,0 +1,176 @@
+
+# HOLIDAYS
+
+# Librerías
+from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
+import time
+import pickle
+import pandas as pd
+
+# Creo la conexión con el driver
+driver = webdriver.Chrome(ChromeDriverManager().install())
+url = "https://publicholidays.com/us/2019-dates/"
+driver.get(url)
+time.sleep(5)
+
+# Maximizo la ventana
+driver.set_window_size(1024, 600) 
+driver.maximize_window()
+
+# Quito el pop up de las cookies si aparece
+time.sleep(5)
+cookies=driver.find_element_by_class_name("ljEJIv")
+try:
+    cookies.click()
+except:
+    None
+
+# Bajar a la parte de los estados
+bajar=driver.find_element_by_xpath("""//*[@id="tablepress-336"]/tbody/tr[4]/td[1]""")
+bajar.click()
+
+# Lista estados completa, columna 1 y 2
+lista_num_estado_filas=list(range(1,28))
+lista_num_estado_col=list(range(1,3))
+#print(lista_num_estado_filas)
+#print(lista_num_estado_col)
+
+# Lista para los xpath
+lista_xpath_estado=[]
+
+# Hago un bucle que vaya recorriendo lista_num y creando los xpath
+for a in lista_num_estado_filas:
+    num_str_estado_fil=str(a)
+    for b in lista_num_estado_col:
+        num_str_estado_col=str(b)
+        crear_xpath_estado='//*[@id="tablepress-336"]/tbody/tr['+num_str_estado_fil+']/td['+num_str_estado_col+']'
+        lista_xpath_estado.append(crear_xpath_estado)
+
+# Quito elementos vacíos de la lista
+lista_xpath_estado=[item for item in lista_xpath_estado if item]
+#print(lista_xpath_estado)
+
+# Bucle que vaya extrayendo cada valor de nombre del xpath
+lista_estados=[]
+for c in lista_xpath_estado:
+    estado=driver.find_elements_by_xpath(c)
+    for d in estado:
+        lista_estados.append(d.text)
+
+# Quito elementos vacíos de la lista
+lista_estados=[item for item in lista_estados if item]
+print(lista_xpath_estado)
+print(lista_estados)
+
+time.sleep(5)
+
+# Creo una lista donde almacenaré los datos que extraiga
+festivos=[]
+for e in lista_estados:
+    festivos.append(e)
+
+# Bucle para recorrer las páginas de cada estado y extraer la info de sus fiestas
+for f in lista_estados:
+    url_estado="https://publicholidays.com/us/"+f+"/2019-dates/"
+    driver.get(url_estado)
+    time.sleep(2)
+    indice_lista=lista_estados.index(f)
+    festivos[indice_lista]=[]
+    for g in list(range(1,4,2)):
+        for h in list(range(1,52)):
+            try:
+                texto_festivo=driver.find_element_by_xpath('//*[@id="row-inner-travel"]/article/div[1]/table/tbody/tr['+str(h)+']/td['+str(g)+']')
+                festivos[indice_lista].append(texto_festivo.text)
+            except:
+                pass
+
+# Eliminar texto de abajo de la tabla
+for i in festivos:
+    indiceI=festivos.index(i)
+    for j in festivos[indiceI]:
+        indiceJ=festivos[indiceI].index(j)
+        if "for the original" in festivos[indiceI][indiceJ]:
+            texto_eliminar=festivos[indiceI][indiceJ]
+            festivos[indiceI].remove(texto_eliminar)
+        else:
+            None
+
+# Comprobar que las listas tienen longitud par 
+for k in festivos:
+    if len(k)%2==0:
+        None
+    else:
+        print("Comprobar filas de la tabla")
+
+#with open("lista_estados.pickle", "wb") as f:
+#    pickle.dump(lista_estados, f)
+#with open("festivos_bruto.pickle", "wb") as f:
+#    pickle.dump(festivos, f)
+
+with open("lista_estados.pickle", "rb") as f:
+    festivos = pickle.load(f)
+with open("festivos_bruto.pickle", "rb") as f:
+    festivos_bruto = pickle.load(f)
+with open("festivos_bruto.pickle", "rb") as f:
+    festivos_dia = pickle.load(f)
+with open("festivos_bruto.pickle", "rb") as f:
+    festivos_fiesta = pickle.load(f)
+
+# Mantener solo la lista de días
+for l in list(range(1,6)):
+    for m in festivos_dia:
+        indiceM=festivos_dia.index(m)
+        for n in festivos_dia[indiceM]:
+            indiceN=festivos_dia[indiceM].index(n)
+            if len(n)>6:
+                texto_dia=festivos_dia[indiceM][indiceN]
+                festivos_dia[indiceM].remove(texto_dia)
+            else:
+                None
+
+# Comprobar que len de cada elemento de festivos_bruto es el doble de festivos_dia
+
+# Mantener lista de fiesta
+for o in list(range(1,6)):
+    for p in festivos_fiesta:
+        indiceP=festivos_fiesta.index(p)
+        for q in festivos_fiesta[festivos_fiesta.index(p)]:
+            indiceQ=festivos_fiesta[indiceP].index(q)
+            if len(q)<7:
+                texto_fiesta=festivos_fiesta[indiceP][indiceQ]
+                festivos_fiesta[indiceP].remove(texto_fiesta)
+            else:
+                None
+
+# Comprobar que len de cada elemento de festivos_fiesta es igual que el de festivos_dia
+
+# Crear dataframe
+df_fiestas=pd.DataFrame()
+
+# Columna Estado
+df_fiestas.insert(0, "Estado", "")
+for r in festivos:
+    indiceR=festivos.index(r)
+    cantidad_dia=len(festivos_dia[indiceR])
+    for s in list(range(1,cantidad_dia+1)):
+        nueva_fila = {'Estado':r}
+        #Añadiendo una fila al dataframe
+        df_fiestas=df_fiestas.append(nueva_fila, ignore_index=True)
+
+# Columna días
+lista_dias=[]
+for t in festivos_dia:
+    for u in festivos_dia[festivos_dia.index(t)]:
+        lista_dias.append(u)
+df_fiestas.insert(1, "Dia", lista_dias)
+
+# Columna fiesta
+lista_fiesta=[]
+for v in festivos_fiesta:
+    for w in festivos_fiesta[festivos_fiesta.index(v)]:
+        lista_fiesta.append(w)
+df_fiestas.insert(2, "Fiesta", lista_fiesta)
+
+# Exportar
+df_fiestas.to_csv("holy_days_states.csv")
