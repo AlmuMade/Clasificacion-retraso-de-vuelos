@@ -1,0 +1,89 @@
+
+# GRADIENT BOOSTING
+
+recipe_dep <- recipe(data = train_dep, arr_delay ~ .) %>%
+  # Estandarizar
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  # No seleccionar fecha
+  update_role(fl_date, new_role = "date") %>%
+  # No seleccionar matrícula
+  update_role(tail_num, new_role = "tail") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  step_other(all_nominal_predictors(), threshold = 0.03) %>%
+  themis::step_downsample(arr_delay, under_ratio = 1) %>%
+  # # Eliminar variables sin varianza
+  step_zv(all_predictors())
+
+# Modelo
+clusters <- detectCores() - 1
+gboost <- boost_tree(mtry = tune(),
+                     min_n = tune(),
+                     learn_rate = tune(),
+                     stop_iter = tune(),
+                     trees = 100) %>% 
+  set_engine("xgboost", num.threads = clusters) %>% 
+  set_mode("classification")
+
+# Flujo de trabajo
+gboost_wf <-
+  workflow() %>%
+  add_recipe(recipe_dep) %>%
+  add_model(gboost)
+
+gboost_tune <- 
+  gboost_wf %>% 
+  tune_grid(resamples = val_set_dep, grid = 10,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(accuracy, sensitivity,
+                                 specificity, roc_auc))
+
+registerDoSEQ()
+
+# Mejores grid
+mejores_grid_gboost <-
+  gboost_tune %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean) %>%
+  arrange(desc(sensitivity))
+mejores_grid_gboost
+
+# Predecir el conjunto test
+modelo_gboost <- gboost_wf %>%
+  update_model(gboost %>% set_args(mtry = 411,
+                                   min_n = 24,
+                                   learn_rate = 0.0313,
+                                   stop_iter = 18,
+                                   trees = 100)) %>%
+  fit(data = train_dep)
+
+prob_test_gboost <- augment(modelo_gboost, test_dep) %>%
+  rename(pred_del_arr = .pred_class)
+prob_test_gboost
+
+# Matriz de confusión
+conf_mat_test_gboost <- prob_test_gboost %>%
+  conf_mat(truth = arr_delay, estimate = pred_del_arr)
+conf_mat_test_gboost
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_gboost <-
+  prob_test_gboost %>%
+  multi_metric(truth = arr_delay, estimate = pred_del_arr)
+metrics_test_gboost
+
+roc_auc_test_gboost <- roc_auc(prob_test_gboost, arr_delay, .pred_FALSE)
+roc_auc_test_gboost
+
+# Curva ROC:
+roc_curve_test_gboost <- prob_test_gboost %>%
+  roc_curve(truth = arr_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_test_gboost, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
