@@ -1,0 +1,222 @@
+
+# ----- VUELOS -----
+
+cat("  - Preprocesando datos de vuelos...\n")
+# Renombramos nombres de columnas (a minúscula)
+data_preproc_fl <-    
+  data_fl %>% 
+  rename(month = MONTH, day_week = DAY_OF_WEEK, fl_date = FL_DATE,
+         carrier = OP_UNIQUE_CARRIER, tail_num = TAIL_NUM,
+         fl_num = OP_CARRIER_FL_NUM, id_ap_orig = ORIGIN_AIRPORT_ID,
+         orig_city = ORIGIN, orig_state = ORIGIN_STATE_ABR,
+         id_ap_dest = DEST_AIRPORT_ID, dest_city = DEST,
+         dest_state = DEST_STATE_ABR, dep_plann_time = CRS_DEP_TIME,
+         dep_time = DEP_TIME, dep_delay_time = DEP_DELAY,
+         dep_delay = DEP_DEL15, arr_plann_time = CRS_ARR_TIME,
+         arr_time = ARR_TIME, arr_delay_time = ARR_DELAY,
+         arr_delay = ARR_DEL15, cancelled = CANCELLED,
+         elap_plann_time_fl = CRS_ELAPSED_TIME, 
+         elap_time_fl = ACTUAL_ELAPSED_TIME, dist = DISTANCE)
+
+# Cambiamos a formato hora
+data_preproc_fl <-    
+  data_preproc_fl %>%
+  mutate(dep_plann_time = hms::hms(sec = rep(0, nrow(data_preproc_fl)),
+                                   min = as.numeric(substr(dep_plann_time,
+                                                           star = 3, stop = 4)),
+                                   hours = as.numeric(substr(dep_plann_time,
+                                                             star = 1, stop = 2))),
+         dep_time = hms::hms(sec = rep(0, nrow(data_preproc_fl)),
+                             min = as.numeric(substr(dep_time,
+                                                     star = 3, stop = 4)),
+                             hours = as.numeric(substr(dep_time,
+                                                       star = 1, stop = 2))),
+         arr_plann_time = hms::hms(sec = rep(0, nrow(data_preproc_fl)),
+                                   min = as.numeric(substr(arr_plann_time,
+                                                           star = 3, stop = 4)),
+                                   hours = as.numeric(substr(arr_plann_time,
+                                                             star = 1, stop = 2))),
+         arr_time = hms::hms(sec = rep(0, nrow(data_preproc_fl)),
+                             min = as.numeric(substr(arr_time,
+                                                     star = 3, stop = 4)),
+                             hours = as.numeric(substr(arr_time,
+                                                       star = 1, stop = 2))))
+
+# Exportamos
+write_csv(data_preproc_fl, "./EXPORTADO/data_preproc_fl.csv")
+
+# Además vamos a generar una tabla en la que vamos solo a quedarnos
+# con los aeropuertos de donde parten o llegan vuelos
+unique_ap <- # listado de id de ap distintos (ambos, origen y destino)
+  data_preproc_fl %>%
+  distinct(id_ap_orig, id_ap_dest) %>%
+  pivot_longer(cols = c("id_ap_orig", "id_ap_dest"),
+               names_to = "orig_dest", values_to = "code") %>%
+  distinct(code)
+
+# Exportamos
+write_csv(unique_ap, "./EXPORTADO/unique_ap.csv")
+
+# borramos el que tiene todas las variables
+rm(list = c("data_fl"))
+
+# ----- AEROPUERTOS -----
+
+cat("  - Preprocesando datos de aeropuertos...\n")
+# Separamos de description
+# [municipio, estado] - [nombre aeropuerto]
+# De la nueva columna mun_state separamos [municipio]- [estado]
+id_ap <-
+  raw_id_ap %>%
+  separate(col = "Description", into = c("mun_state", "name_ap"),
+           sep = ":", ) %>%
+  separate(col = "mun_state", into = c("mun", "state"),
+           sep = ",")
+
+# Renombramos y eliminamos huecos en blanco al inicio/final
+id_ap <-
+  id_ap %>%
+  mutate(across(c("mun", "state", "name_ap"), str_trim)) %>% 
+  rename(code = Code, state_abbrev = state)
+
+# Depuramos nombres de aeropuertos
+id_ap <-
+  id_ap %>%
+  mutate(name_ap = str_to_upper(name_ap), # Nombres a mayúsculas
+         # Eliminamos cabeceras de aeropuertos
+         name_ap = str_replace_all(name_ap, "AIRPORT", ""),
+         name_ap = str_replace_all(name_ap, "AIRPARK", ""),
+         name_ap = str_replace_all(name_ap, "AIR PARK", ""),
+         name_ap = str_replace_all(name_ap, "AIRSTRIP", ""),
+         name_ap = str_replace_all(name_ap, "AIR STRIP", ""),
+         name_ap = str_replace_all(name_ap, "AIRFIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIR FIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIRCRAFT FIELD", ""),
+         name_ap = str_replace_all(name_ap, "FIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIR TERMINAL", ""),
+         name_ap = str_replace_all(name_ap, "AIRCENTER", ""),
+         name_ap = str_replace_all(name_ap, "AIR CENTER", ""),
+         name_ap = str_replace_all(name_ap, "AIR HARBOR", ""),
+         name_ap = str_replace_all(name_ap, "AIR FORCE BASE ", "AFB"),
+         name_ap = str_replace_all(name_ap, "AIR AND SPACE PORT", " "),
+         name_ap = str_replace_all(name_ap, "F. ", "F "),
+         name_ap = str_replace_all(name_ap, " A. ", " A "),
+         name_ap = str_replace_all(name_ap, "ST. ", "ST "),
+         name_ap = str_replace_all(name_ap, "METRO ", "METROPOLITAN "),
+         name_ap = str_replace_all(name_ap, " & ", " AND "),
+         name_ap = str_replace_all(name_ap, " NAT ", " NATIONAL "),
+         name_ap = str_replace_all(name_ap, "-", " "),
+         name_ap = str_replace_all(name_ap, "/", " "),
+         name_ap = str_replace_all(name_ap, "   ", " "),
+         name_ap = str_replace_all(name_ap, "  ", " "),
+         # Eliminamos espacios en blanco a inicio/final
+         name_ap = str_trim(name_ap))
+
+# Exportamos
+write_csv(id_ap, file = "./EXPORTADO/id_ap.csv")
+
+rm(list = c("raw_id_ap"))
+
+# ----- COORDENADAS AEROPUERTOS -----
+
+cat("  - Preprocesando datos de coordenadas de aeropuertos...\n")
+
+# De la columna iso_region extraemos estado
+# De la columna coordinates extraemos lat y long (separados por comas)
+coord_ap <-
+  raw_coord_ap %>%
+  separate(col = iso_region,
+           into = c("country", "state_abbrev"), sep = "-") %>%
+  separate(col = coordinates,
+           into = c("lon", "lat"), sep = ",", convert = TRUE) %>% 
+  select(-country) # eliminamos country (US)
+
+# Filtramos coordenadas solo de USA y solo
+# observaciones que tengan longitud y latitud
+coord_ap <-
+  coord_ap %>%
+  filter(iso_country == "US") %>%
+  drop_na(lon, lat)
+
+# Seleccionamos variables y renombramos
+coord_ap <-
+  coord_ap %>%
+  select(c(ident, type, name, elevation_ft, iso_country,
+           state_abbrev, lon, lat)) %>%
+  rename(name_ap = name) %>%
+  # Nombres ap a mayúsculas
+  mutate(name_ap = str_to_upper(name_ap))
+
+# Depuramos nombres aeropuertos
+coord_ap <-
+  coord_ap %>% 
+  mutate(name_ap = str_to_upper(name_ap), # Nombres a mayúsculas
+         # Eliminamos cabeceras de aeropuertos
+         name_ap = str_replace_all(name_ap, "AIRPORT", ""),
+         name_ap = str_replace_all(name_ap, "AIRPARK", ""),
+         name_ap = str_replace_all(name_ap, "AIR PARK", ""),
+         name_ap = str_replace_all(name_ap, "AIRSTRIP", ""),
+         name_ap = str_replace_all(name_ap, "AIR STRIP", ""),
+         name_ap = str_replace_all(name_ap, "AIRFIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIR FIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIRCRAFT FIELD", ""),
+         name_ap = str_replace_all(name_ap, "FIELD", ""),
+         name_ap = str_replace_all(name_ap, "AIR TERMINAL", ""),
+         name_ap = str_replace_all(name_ap, "AIRCENTER", ""),
+         name_ap = str_replace_all(name_ap, "AIR CENTER", ""),
+         name_ap = str_replace_all(name_ap, "AIR HARBOR", ""),
+         name_ap = str_replace_all(name_ap, "AIR FORCE BASE", "AFB"),
+         name_ap = str_replace_all(name_ap, "AIR AND SPACE PORT", " "),
+         name_ap = str_replace_all(name_ap, "F. ", "F "),
+         name_ap = str_replace_all(name_ap, " A. ", " A "),
+         name_ap = str_replace_all(name_ap, "ST. ", "ST "),
+         name_ap = str_replace_all(name_ap, "METRO ", "METROPOLITAN "),
+         name_ap = str_replace_all(name_ap, " & ", " AND "),
+         name_ap = str_replace_all(name_ap, " NAT ", " NATIONAL "),
+         name_ap = str_replace_all(name_ap, "-", " "),
+         name_ap = str_replace_all(name_ap, "/", " "),
+         name_ap = str_replace_all(name_ap, "   ", " "),
+         name_ap = str_replace_all(name_ap, "  ", " "),
+         # Eliminamos espacios en blanco a inicio/final
+         name_ap = str_trim(name_ap)) %>%
+  # Eliminamos duplicados por nombre y estado abbrev
+  distinct(state_abbrev, name_ap, .keep_all = TRUE)
+
+# Exportamos
+write_csv(coord_ap, file = "./EXPORTADO/coord_ap.csv")
+
+rm(list = c("raw_coord_ap"))
+
+# ----- ESTADOS -----
+
+cat("  - Preprocesando datos de estados...\n")
+
+# A mayúsculas los nombres de estado y abbrev
+states_USA <-
+  states_USA %>%
+  mutate(across(c(state_name, state_abbrev), str_to_upper)) %>% 
+  # Seleccionamos solo nombre, abrev. y capital
+  select(c(state_name, state_abbrev, main_city))
+
+# Exportamos
+write_csv(states_USA, file = "./EXPORTADO/states_USA.csv")
+
+# ----- FESTIVOS -----
+
+# Añadimos info del estado
+free_days <- 
+  raw_free_days %>%
+  # Pasamos estados a mayúscula
+  mutate(state = str_to_upper(state)) %>% 
+  # Transformamos fecha
+  mutate(date = dmy(glue("{date} 2019"))) %>%
+  # Cruzamos con info del estado
+  left_join(states_USA, by = c("state" = "state_name")) %>% 
+  # Hay uno con NA --> Distrito de Columbia,
+  # realmente no es un estado, lo quitamos
+  drop_na(state_abbrev)
+
+# Exportamos
+write_csv(free_days, file = "./EXPORTADO/holy_days_states.csv")
+
+rm(list = c("raw_free_days"))
