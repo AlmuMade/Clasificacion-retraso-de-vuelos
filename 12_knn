@@ -1,0 +1,84 @@
+
+# KNN
+
+recipe_data_dummy <- recipe(data = train_dummy, dep_delay ~ .) %>%
+  # Estandarizar
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  # No seleccionar variables
+  update_role(fl_date, new_role = "date") %>%
+  update_role(arr_delay, new_role = "arr_del") %>%
+  update_role(tail_num, new_role = "tail_num") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Eliminar variables sin varianza
+  step_zv(all_predictors()) %>%
+  # Bajomuestreo
+  themis::step_downsample(dep_delay, under_ratio = 1)
+
+
+# Modelo
+modelo_knn <- nearest_neighbor(mode = "classification",
+                               neighbors = tune("k"),
+                               dist_power = tune("dist")) %>%
+  set_engine("kknn")
+
+# Flujo de trabajo
+flujo_knn <- workflow() %>%
+  add_recipe(recipe_data_dummy) %>%
+  add_model(modelo_knn)
+
+# Grid
+grid_knn <- expand.grid(k = c(5, 50),
+                        dist = c(1, 2))
+grid_knn
+gc()
+
+knn_tune <-
+  flujo_knn %>%
+  tune_grid(resamples = val_set_dummy,
+            grid = grid_knn,
+            metrics = metric_set(accuracy, roc_auc))
+
+# Mejores grid
+mejores_grid_knn <-
+  knn_tune %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean)
+mejores_grid_knn
+
+# Predecir el conjunto test
+modelo_knn <- flujo_knn %>%
+  update_model(modelo_knn %>%
+                 set_args(neighbors = 50,
+                          dist_power = 1)) %>%
+  parsnip::fit(data = train_dummy)
+
+prob_test_knn <- augment(modelo_knn, test_dummy) %>%
+  rename(pred_del_dep = .pred_class)
+
+# Matriz de confusión
+conf_mat_test_knn <- prob_test_knn %>%
+  conf_mat(truth = dep_delay, estimate = pred_del_dep)
+conf_mat_test_knn
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_knn <-
+  prob_test_knn %>%
+  multi_metric(truth = dep_delay, estimate = pred_del_dep)
+metrics_test_knn
+
+roc_auc_knn <- roc_auc(prob_test_knn, dep_delay, .pred_FALSE)
+roc_auc_knn
+
+# Curva ROC:
+roc_curve_knn <- prob_test_knn %>%
+  roc_curve(truth = dep_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_knn, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
