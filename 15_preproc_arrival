@@ -1,0 +1,42 @@
+
+# ---- PREPROCESAMIENTOS DE DATOS PARA SEGUNDO MODELADO ----
+prob_test <- read_csv("./EXPORTADO/prob_test_svm_polyn.csv")
+
+prob_test$del_prev = FALSE
+
+for (j in 1:nrow(prob_test)) {
+  ifelse(prob_test$fl_date == prob_test$fl_date[j]&
+           prob_test$tail_num == prob_test$tail_num[j] &
+           prob_test$name_ap_dest == prob_test$name_ap_orig[j] &
+           prob_test$num_dep_plann_time < prob_test$num_dep_plann_time[j] &
+           prob_test$num_arr_plann_time + 3600 >= prob_test$num_dep_plann_time[j]&
+           prob_test$pred_del_dep == TRUE,
+         prob_test$del_prev[j] <- TRUE,
+         prob_test$del_prev[j] <- prob_test$del_prev[j])
+  print(j)
+}
+
+data_dep <- prob_test %>%
+  mutate(arr_delay = as_factor(arr_delay),
+         pred_del_dep = as.numeric(as.factor(pred_del_dep)),
+         del_prev = as.numeric(as.factor(del_prev))) %>%
+  dplyr::select(-c(".pred_FALSE", ".pred_TRUE")) %>%
+  dplyr::select(-dep_delay)
+
+write_csv(prob_test, file = "./EXPORTADO/data_dep.csv")
+
+
+# ---- PARTICIONES ----
+
+# División train-test (train 2.690.807 obs y test 896.937 obs)
+set.seed(1996)
+particion_data_dep <- data_dep %>%
+  group_by(month) %>%
+  initial_split(strata = arr_delay, prop = 0.75)
+
+set.seed(1996)
+train_dep <- training(particion_data_dep)
+set.seed(1996)
+test_dep <- testing(particion_data_dep)
+set.seed(1996)
+val_set_dep <- validation_split(train_dep, strata = arr_delay, prop = 0.80)
