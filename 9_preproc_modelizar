@@ -1,0 +1,69 @@
+
+# Leer fichero final
+final_data_sampled <- read_csv("./EXPORTADO/final_data_sampled.csv")
+
+# Crear una varible igual a name_ap orig y dest para utilizar despues
+final_data_sampled$name_ap_orig2 <- final_data_sampled$name_ap_orig
+final_data_sampled$name_ap_dest2 <- final_data_sampled$name_ap_dest
+
+# Eliminar variables horas y retraso en minutos
+# Cambiar a numericas las variables logical
+final_data_sampled <- final_data_sampled %>%
+  select(-c(dep_plann_time, dep_delay_time,
+            arr_plann_time, arr_delay_time)) %>%
+  mutate(fog_orig = as.numeric(as_factor(fog_orig)),
+         thunder_orig = as.numeric(as_factor(thunder_orig)),
+         highwind_orig = as.numeric(as_factor(highwind_orig)),
+         hail_orig = as.numeric(as_factor(hail_orig)),
+         tornado_orig = as.numeric(as_factor(tornado_orig)),
+         fog_dest = as.numeric(as_factor(fog_dest)),
+         thunder_dest = as.numeric(as_factor(thunder_dest)),
+         highwind_dest = as.numeric(as_factor(highwind_dest)),
+         hail_dest = as.numeric(as_factor(hail_dest)),
+         tornado_dest = as.numeric(as_factor(tornado_dest)),
+         orig_night = as.numeric(as_factor(orig_night)),
+         dest_night = as.numeric(as_factor(dest_night)),
+         free_day_orig = as.numeric(as_factor(free_day_orig)),
+         free_day_dest = as.numeric(as_factor(free_day_dest)))
+
+# final_data_sampled -- fichero para no dummys
+# Crear fichero dummys
+recipe_dummy <- recipe(data = final_data_sampled, dep_delay ~ .) %>%
+  # No utillizamos fecha, matricula y las copiar de los aeropuertos
+  update_role(fl_date, new_role = "date") %>%
+  update_role(tail_num, new_role = "tail") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Dummy todas las varibales categoricas
+  step_dummy(all_nominal_predictors())
+
+final_data_dummy <- bake(recipe_dummy %>% prep(), new_data = NULL)
+
+# Transformar variable objetivo en ambos ficheros
+final_data_sampled <- final_data_sampled %>%
+  mutate(dep_delay = as_factor(dep_delay))
+
+final_data_dummy <- final_data_dummy %>%
+  mutate(dep_delay = as_factor(dep_delay))
+
+# Particion final_data_sampled
+set.seed(1996)
+particion_tr_test <- final_data_sampled %>%
+  initial_split(strata = dep_delay, prop = 0.75)
+set.seed(1996)
+train_data <- training(particion_tr_test)
+test_data <- testing(particion_tr_test)
+set.seed(1996)
+val_set_data <- validation_split(train_data, strata = dep_delay,
+                                  prop = 0.80)
+
+# Particion final_data_dummy
+set.seed(1996)
+particion_tr_tst_dummy <- final_data_dummy %>%
+  initial_split(strata = dep_delay, prop = 0.75)
+set.seed(1996)
+train_dummy <- training(particion_tr_tst_dummy)
+test_dummy <- testing(particion_tr_tst_dummy)
+set.seed(1996)
+val_set_dummy <- validation_split(train_dummy, strata = dep_delay,
+                                  prop = 0.80)
