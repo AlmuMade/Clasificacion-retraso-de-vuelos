@@ -1,0 +1,140 @@
+
+# ----- DATOS DE VUELOS -----
+
+# Nombre archivos .csv
+name_files <- glue("19_{c(glue('0{1:9}'), 10:12)}")
+
+# Cargamos los datos evitando bucle con map ({purrr})
+raw_data_list_fl <-
+  name_files %>%
+  map(function(x) {
+    data <- read_csv(file = glue("./DATOS/FLIGHTS_2019/{x}.csv"))
+    return(data)
+  })
+names(raw_data_list_fl) <- name_files # nombres con la fecha
+
+# Guardamos lista en formato .Rdata
+save(raw_data_list_fl,
+     file = "./EXPORTADO/raw_data_list_fl_2019.RData")
+
+# Juntamos todo en una sola tabla y borramos la lista
+raw_data_fl <-
+  rbind(raw_data_list_fl$`19_01`, raw_data_list_fl$`19_02`,
+        raw_data_list_fl$`19_03`, raw_data_list_fl$`19_04`,
+        raw_data_list_fl$`19_05`, raw_data_list_fl$`19_06`,
+        raw_data_list_fl$`19_07`, raw_data_list_fl$`19_08`,
+        raw_data_list_fl$`19_09`, raw_data_list_fl$`19_10`,
+        raw_data_list_fl$`19_11`, raw_data_list_fl$`19_12`)
+rm(list = c("raw_data_list_fl", "name_files"))
+
+# Vamos a seleccionar ya columnas para reducir tamaño
+data_fl <- 
+  raw_data_fl %>%
+  select(c("MONTH", "DAY_OF_WEEK", "FL_DATE", "OP_UNIQUE_CARRIER", "TAIL_NUM",
+           "OP_CARRIER_FL_NUM","ORIGIN_AIRPORT_ID", "ORIGIN",
+           "ORIGIN_STATE_ABR", "DEST_AIRPORT_ID", "DEST", "DEST_STATE_ABR",
+           "CRS_DEP_TIME", "DEP_TIME", "DEP_DELAY", "DEP_DEL15",
+           "CRS_ARR_TIME", "ARR_TIME", "ARR_DELAY", "ARR_DEL15",
+           "CANCELLED", "CRS_ELAPSED_TIME", "ACTUAL_ELAPSED_TIME", "DISTANCE",
+           "OP_UNIQUE_CARRIER"))
+
+# Exportamos archivo de vuelos en bruto
+write_csv(data_fl, "./EXPORTADO/data_fl_2019.csv")
+
+rm(list = c("raw_data_fl"))
+
+# Exportar tabla con las causas de los retrasos para hacer visualizaciones
+data_delay_cause <- 
+  raw_data_fl %>% 
+  select(c("FL_DATE", "OP_UNIQUE_CARRIER", "OP_CARRIER_FL_NUM",
+           "ORIGIN_AIRPORT_ID", "DEST_AIRPORT_ID", "DEP_DELAY",
+           "DEP_DEL15", "CARRIER_DELAY", "WEATHER_DELAY", "NAS_DELAY",
+           "SECURITY_DELAY", "LATE_AIRCRAFT_DELAY"))
+
+# Exportamos
+write_csv(data_delay_cause, "./EXPORTADO/data_delay_cause.csv")
+
+rm(list = c("data_delay_cause"))
+
+# ----- DATOS DE AEROPUERTOS -----
+
+# Diccionario id-nombre de los aeropuertos de EEUU
+raw_id_ap <- read_csv(file = "./DATOS/raw_id_ap.csv")
+
+# Coordenadas de los aeropuertos
+raw_coord_ap <- read_csv(file = "./DATOS/raw_coord_ap.csv")
+
+# ----- ESTADOS -----
+# Tabla de estados de EEUU
+states_USA <-
+  tribble(
+    ~state_name, ~state_abbrev, ~union_date, ~main_city, ~most_pop_city,
+    "Alabama", "AL", "14-12-1819", "Montgomery", "Birmingham",
+    "Alaska", "AK", "03-01-1959", "Juneau", "Anchorage",
+    "Arizona", "AZ", "14-02-1912", "Phoenix", "Phoenix",
+    "Arkansas", "AR", "15-06-1836", "Little Rock", "Little Rock",
+    "California", "CA", "09-09-1850", "Sacramento", "Los ?ngeles",
+    "North Carolina", "NC", "21-11-1789", "Raleigh", "Charlotte",
+    "South Carolina", "SC", "23-05-1788", "Columbia", "Columbia",
+    "Colorado", "CO", "01-08-1876", "Denver", "Denver",
+    "Connecticut", "CT", "09-01-1788", "Hartford", "Bridgeport",
+    "North Dakota", "ND", "02-11-1889", "Bismarck", "Fargo",
+    "South Dakota", "SD", "02-11-1889", "Pierre", "Sioux Falls",
+    "Delaware", "DE", "07-12-1787", "Dover", "Wilmington",
+    "Florida", "FL", "03-03-1845", "Tallahassee", "Jacksonville",
+    "Georgia", "GA", "02-01-1788", "Atlanta", "Atlanta",
+    "Hawaii", "HI", "21-08-1959", "Honolulu", "Honolulu",
+    "Idaho", "ID", "03-07-1890", "Boise", "Boise",
+    "Illinois", "IL", "03-12-1818", "Springfield", "Chicago",
+    "Indiana", "IN", "11-12-1816", "Indian?polis", "Indianapolis",
+    "Iowa", "IA", "28-12-1846", "Des Moines", "Des Moines",
+    "Kansas", "KS", "29-01-1861", "Topeka", "Wichita",
+    "Kentucky", "KY", "01-06-1792", "Frankfort", "Louisville",
+    "Louisiana", "LA", "30-04-1812", "Baton Rouge", "Nueva Orleans",
+    "Maine", "ME", "15-03-1820", "Augusta", "Portland",
+    "Maryland", "MD", "28-04-1788", "Annapolis", "Baltimore",
+    "Massachusetts", "MA", "06-02-1788", "Boston", "Boston",
+    "Michigan", "MI", "26-01-1837", "Lansing", "Detroit",
+    "Minnesota", "MN", "11-05-1858", "Saint Paul", "Mineapolis",
+    "Mississippi", "MS", "10-12-1817", "Jackson", "Jackson",
+    "Missouri", "MO", "10-08-1821", "Jefferson City", "Kansas City",
+    "Montana", "MT", "08-11-1889", "Helena", "Billings",
+    "Nebraska", "NE", "01-03-1867", "Lincoln", "Omaha",
+    "Nevada", "NV", "31-10-1864", "Carson City", "Las Vegas",
+    "New Jersey", "NJ", "18-12-1787", "Trenton", "Newark",
+    "New York", "NY", "26-07-1788", "Albany", "Nueva York",
+    "New Hampshire", "NH", "21-06-1788", "Concord", "Manchester",
+    "New Mexico", "NM", "06-01-1912", "Santa Fe", "Albuquerque",
+    "Ohio", "OH", "01-03-1803", "Columbus", "Columbus",
+    "Oklahoma", "OK", "16-11-1907", "Oklahoma City", "Oklahoma City",
+    "Oregon", "OR", "14-02-1859", "Salem", "Portland",
+    "Pennsylvania", "PA", "12-12-1787", "Harrisburg", "Filadelfia",
+    "Rhode Island", "RI", "29-05-1790", "Providence", "Providence",
+    "Tennessee",  "TN", "01-06-1796", "Nashville", "Memphis",
+    "Texas", "TX", "29-12-1845", "Austin", "Houston",
+    "Utah", "UT", "04-01-1896", "Salt Lake City", "Salt Lake City",
+    "Vermont", "VT", "04-03-1791", "Montpelier", "Burlington",
+    "Virginia", "VA", "25-06-1788", "Richmond", "Virginia Beach",
+    "West Virginia", "WV", "20-06-1863", "Charleston", "Charleston",
+    "Washington", "WA", "11-11-1889", "Olympia", "Seattle",
+    "Wisconsin", "WI", "29-05-1848", "Madison", "Milwaukee",
+    "Wyoming", "WY", "10-07-1890", "Cheyenne", "Cheyenne"
+  )
+
+# Exportamos
+write_csv(states_USA, file = "./EXPORTADO/states_USA.csv")
+
+
+# ----- FESTIVOS -----
+
+# Fuente: https://publicholidays.com/us/
+# Extraídas con webscrapping en Python
+raw_free_days <- read_csv(file = "./DATOS/holy_days_states.csv",
+                          progress = FALSE, show_col_types = FALSE)
+raw_free_days <- # Renombramos y eliminamos columna conteo
+  raw_free_days %>%
+  select(Estado, Dia, Fiesta) %>% 
+  rename(state = Estado, date = Dia, holy = Fiesta)
+
+# Exportamos
+write_csv(raw_free_days, file = "./EXPORTADO/raw_free_days.csv")
