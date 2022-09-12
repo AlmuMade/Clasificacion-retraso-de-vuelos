@@ -1,0 +1,211 @@
+# ----- INTRO -----
+
+# Borramos todo
+rm(list = ls())
+cat("Cargando paquetes...\n")
+
+# Cargamos paquetes
+library(tidyverse) # Manejo de datos + ggplot2
+library(forcats) # factores
+library(readr) # Importar ficheros
+library(purrr) # Operaciones con listas
+library(glue) # Pegar cadenas de texto literal
+library(lubridate) # Manejo de fechas
+library(rnoaa) # Datos meteo
+library(stringr) # Editar cadenas
+library(sf) # Sacar zona horaria
+library(lutz) # Sacar zona horaria
+library(suncalc) # Posición del sol
+
+# Paquetes exploración de datos
+library(skimr) # Estadísticos
+library(scales) # Cambiar escalas en gráficos
+library(sp) # Mapas
+library(rgdal) # Mapas
+library(corrplot) # Gráfico correlaciones
+library(imputeTS) # Imputar NAs
+library(showtext)   # Cambiar fuentes en los gráficos
+
+# Paquetes modelizacion
+library(tidymodels) # Modelado
+library(themis) # Bajomuestreo
+library(rpart) # Arboles de decisión
+library(parallel) # Paralelizar
+library(doParallel) # Paralelizar
+library(LiblineaR) # Regresión lineal
+library(kernlab) # SVM
+library(kknn) #KNN
+library(ranger) # Random forest
+library(xgboost) # Gradient boosting
+library(rpart.plot)
+library(vip)
+
+# ----- IMPORTAR DATOS EN BRUTO -----
+cat("Importando datos en bruto...\n")
+
+# Descomentar solo si cambia algo
+source("./importar_datos.R")
+
+# Vuelos con selección de variables ya realizada
+data_fl <- read_csv("./EXPORTADO/data_fl_2019.csv",
+                    progress = FALSE, show_col_types = FALSE)
+
+# Tabla con las causas de los retrasos para hacer visualizaciones
+data_delay_cause <-
+  read_csv("./EXPORTADO/data_delay_cause.csv",
+           progress = FALSE, show_col_types = FALSE)
+
+
+# Diccionario id-nombre de los aeropuertos de EEUU
+# code: código id del aeropuerto
+# description: [mun, siglas estado; nombre ap]
+raw_id_ap <- read_csv("./DATOS/raw_id_ap.csv",
+                      progress = FALSE,
+                      show_col_types = FALSE)
+
+# Coordenadas de los aeropuertos
+raw_coord_ap <- read_csv(file = "./DATOS/raw_coord_ap.csv",
+                         progress = FALSE,
+                         show_col_types = FALSE)
+
+# Datos de Estados Unidos
+# state_name, state_abbrev: nombre y abreviatura del estado
+# union_date: fecha de su unión
+# main_city, most_pop_city: capital y ciudad más poblada
+states_USA <- read_csv("./EXPORTADO/states_USA.csv",
+                       progress = FALSE, show_col_types = FALSE)
+
+# Datos de festivos por estado
+# Fuente: https://publicholidays.com/us/
+# Extraídas con webscrapping en Python
+# Info de estados añadida 
+free_days <-
+  read_csv(file = "./EXPORTADO/holy_days_states.csv",
+           progress = FALSE, show_col_types = FALSE)
+
+# ----- PREPROCESAMIENTO -----
+
+cat("Preprocesando tablas...\n")
+source("./preproc.R")
+
+# vuelos: data_fl --> data_preproc_fl
+#   - Selección de variables (ya hecha)
+#   - Renombrar nombres columnas
+#   - Formateamos horas de dep_plann_time, dep_time, arr_plann_time, arr_time
+#
+# Nueva tabla: unique_ap aeropuertos de donde salen o llegan vuelos
+
+# diccionario aeropuertos: raw_id_ap --> id_ap
+#   - Separamos de description [municipio, estado] - [nombre aeropuerto]
+#   - De la nueva columna mun_state separamos [municipio]- [estado]
+#   - Renombramos columnas y eliminamos huecos en blanco al inicio/final
+#   - Depuramos nombres de aeropuertos: nombres a mayúsculas
+#     y eliminamos cabeceras de aeropuertos
+
+# coordenadas de ap: raw_coord_ap --> coord_ap
+#   - De la columna iso_region extraemos estado
+#   - De la columna coordinates extraemos lat y long 
+#   - Eliminamos country
+#   - Filtramos coordenadas solo de USA y solo
+#     observaciones que tengan longitud y latitud
+#   - Seleccionamos variables y renombramos (name --> name_ap)
+#   - Nombres ap (name_ap) a mayúsculas
+#   - Depuramos nombres de aeropuertos: nombres a mayúsculas
+#     y eliminamos cabeceras de aeropuertos
+#   - Eliminamos duplicados por nombre y estado abbrev
+
+# Estados: states_USA --> states_USA 
+#   - A mayúsculas los nombres de estado y abbrev
+#   - Seleccionamos solo nombre, abrev. y capital
+
+# ----- CONSTRUIR BASE DE DATOS -----
+
+# ----- Cruzamos tablas -----
+cat("Cruzando tablas...\n")
+source("./build_database.R")
+
+# 1. Incluimos en data_preproc_fl tráfico aéreo para
+#    ap de origen y ap de destino
+# data_preproc_fl --> data_fl_traffic
+
+# 2. Cruce id_ap + states_USA --> data_ap
+#    - Eliminamos ap duplicados que tengan mismo nombre en
+#      el mismo estado
+#    - Eliminamos los state_name vacio
+
+# 3. Cruce unique_ap (solo id) + data_ap --> data_ap
+
+# 4. Cruce data_ap + coord_ap --> data_ap_coord
+#    - Añadimos coordenadas a los datos de ap (+estados)
+#    - Eliminamos duplicados de aeropuertos iguales en mismo estado
+#    - Eliminamos ap sin (lon, lat)
+
+# 5. Cruce data_fl_traffic + data_ap_coord --> data_fl_ap_traffic 
+#    - Cruzamos datos de vuelos + datos ap (con coord) cruzando
+#      por ap de origen y destino
+#    - Seleccionamos variables
+#    - Renombramos por ap de origen y destino
+#    - Eliminamos de nuevo filas que no tengan datos de
+#      coordenadas de origen o destino
+#    - Eliminamos los que no tengan datos del retraso en
+#      destino (--> cancelados)
+
+data_fl_ap_traffic <-
+  read_csv(file = "./EXPORTADO/data_fl_ap_traffic.csv")
+data_ap_coord <-
+  read_csv(file = "./EXPORTADO/data_ap_coord.csv")
+
+# ----- Añadimos info ------ 
+
+cat("Añadimos info meteo, time zones, etc...\n")
+
+# Añadimos info meteo
+source("./extract_data_meteo.R")
+
+# meteo_stations --> listado estaciones
+# meteo_data --> datos meteorológicos de las estaciones
+# data_fl_ap_traffic_meteo --> meteo añadido a la tabla anterior
+# meteo_sin_na_postimput --> valores de meteo sin NA
+data_fl_ap_traffic_meteo <-
+  read_csv(file = "./EXPORTADO/data_fl_ap_traffic_meteo.csv")
+
+# Info de zonas horarias y festivos
+source("./time_zones.R")
+# data_fl_ap_traffic_meteo_tz --> tz añadido a la tabla anterior
+data_fl_ap_traffic_meteo_tz <-
+  read_csv(file = "./EXPORTADO/data_fl_ap_traffic_meteo_tz.csv")
+
+# Preprocesamiento final para depurar 
+# variables que no aportan info
+source("./last_preproc.R")
+final_data <- read_csv(file = "./EXPORTADO/final_data.csv")
+
+# Analisis exploratorio de datos
+source("./analisis_expl.R")
+
+# Preprocesamiento para modelos
+source("./preproc_modelizar.R")
+
+# Reg logistica
+source("./reg_log.R")
+
+# Arbol de decision
+source("./tree.R")
+
+# Knn
+source("./knn.R")
+
+# SVM lineal
+source("./svm_lineal.R")
+
+# SVM polinomico
+source("./svm_poly.R")
+
+# Preproc arrival
+source("./extract_data_meteo.R")
+
+# Random forest
+source("./random_forest.R")
+
+# Gradient boosting
+source("./gboosting.R")
