@@ -1,0 +1,86 @@
+
+# SVM LINEAL
+
+recipe_data_dummy <- recipe(data = train_dummy, dep_delay ~ .) %>%
+  # Estandarizar
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  # No seleccionar variables
+  update_role(fl_date, new_role = "date") %>%
+  update_role(arr_delay, new_role = "arr_del") %>%
+  update_role(tail_num, new_role = "tail_num") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Eliminar variables sin varianza
+  step_zv(all_predictors()) %>%
+  # Bajomuestreo
+  themis::step_downsample(dep_delay, under_ratio = 1)
+
+# MODELO
+svm_lin <- svm_linear(mode = "classification",
+                      cost = tune("coste"),
+                      engine = "kernlab")
+
+# Flujo de trabajo
+svm_lin_wf <- workflow() %>% add_recipe(recipe_data_dummy) %>%
+  add_model(svm_lin)
+
+# Grid
+grid_svm_lin <- expand.grid(coste = c(0.01, 1, 10))
+grid_svm_lin
+gc()
+
+svm_lin_tune <-
+  svm_lin_wf %>%
+  tune_grid(resamples = val_set_dummy, grid = grid_svm_lin,
+            metrics = metric_set(accuracy, roc_auc))
+
+# Mejores grid
+mejores_grid_svm_lin <-
+  svm_lin_tune %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean)
+mejores_grid_svm_lin
+
+ggplot(mejores_grid_svm_lin) +
+  aes(x = accuracy, y = roc_auc, color = coste, size = coste) + geom_point() +
+  # scale_x_continuous(breaks = seq(10, 30, 10)) +
+  labs(y = "Curva ROC\n", x = "\nAccuracy",
+       color = "Coste", size = "Coste") +
+  scale_color_gradient2(midpoint = 0.54, low = "#C30019", mid = "grey",
+                        high = "#0078D2", space ="Lab" ) +
+  guides(fill = FALSE)
+
+# Predecir el conjunto test
+modelo_svm_lin <- svm_lin_wf %>%
+  update_model(svm_lin %>% set_args(cost = 0.1)) %>%
+  fit(data = train_dummy)
+
+prob_test_svm_lin <- augment(modelo_svm_lin, test_dummy) %>%
+  rename(pred_del_dep = .pred_class)
+
+# Matriz de confusión
+conf_mat_test_svm_lin <- prob_test_svm_lin %>%
+  conf_mat(truth = dep_delay, estimate = pred_del_dep)
+conf_mat_test_svm_lin
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_svm_lin <-
+  prob_test_svm_lin %>%
+  multi_metric(truth = dep_delay, estimate = pred_del_dep)
+metrics_test_svm_lin
+
+roc_auc_svm_lin <- roc_auc(prob_test_svm_lin, dep_delay, .pred_FALSE)
+roc_auc_svm_lin
+
+# Curva ROC:
+roc_curve_svm_lin <- prob_test_svm_lin %>%
+  roc_curve(truth = dep_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_svm_lin, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
