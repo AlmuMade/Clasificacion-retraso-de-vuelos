@@ -1,0 +1,244 @@
+
+# ----- EXTRAYENDO LISTADO ESTACIONES METEO ------
+
+# Buscamos listado de estaciones meteo (radio máximo: 50 km) cerca
+# de los aeropuertos (tenemos en data_ap_coord, sin vuelos)
+meteo_stations_list <-
+  data_ap_coord %>%
+  mutate(bind_rows(meteo_nearby_stations(lat_lon_df = data_ap_coord,
+                                         lat_colname = "lat",
+                                         lon_colname = "lon",
+                                         station_data = ghcnd_stations(),
+                                         year_min = 2018, year_max = 2020,
+                                         limit = 1, radius = 50,
+                                         var =
+                                           c("PRCP", "SNOW", "SNWD", "TMAX",
+                                             "TMIN", "AWDR", "FRTH", "RHAV",
+                                             "TAVG", "WT01", "WT03",
+                                             "WT05", "WT10", "WT11"))))
+
+# Depuramos info de estaciones
+meteo_stations <-
+  meteo_stations_list %>%
+  # Borramos las NA (las que se salian del radio)
+  drop_na(id) %>%
+  # Eliminamos duplicados por nombre aeropuerto y estado
+  distinct(code, name_ap, state_abbrev, .keep_all = TRUE) %>% 
+  # Seleccionamos solo variables codigo e id de la estacion
+  select(code, id) %>%
+  # Renombramos
+  rename(id_meteo_st = id)
+
+# Exportamos
+write_csv(meteo_stations, file = "./EXPORTADO/meteo_stations.csv")
+
+# Eliminamos tablas que no necesitaremos
+rm(list = c("meteo_stations_list"))
+
+# ----- DESCARGAMOS DATOS DE LAS ESTACIONES METEO ------
+
+# Descarga de los datos meteo de las estaciones encontradas
+raw_meteo_data <-
+  meteo_pull_monitors(meteo_stations$id_meteo_st,
+                      date_min = as_date("2018-12-31"),
+                      date_max = as_date("2020-01-01"),
+                      var =
+                        c("PRCP", "SNOW", "SNWD", "TMAX",
+                          "TMIN", "RHAV", "TAVG", "WT01",
+                          "WT03", "WT05", "WT10", "WT11")) %>%
+  # Renombramos el id de la estación
+  rename(id_meteo_st = id)
+
+# Exportamos
+write_csv(raw_meteo_data, "./EXPORTADO/raw_meteo_data.csv")
+
+# Cruce datos meteo + estaciones: unimos los datos meteo
+# con el code del aeropuerto que tenemos en el listado 
+# de estaciones
+meteo_data <-
+  raw_meteo_data %>%
+  left_join(meteo_stations, by = "id_meteo_st")
+
+# Exportamos
+write_csv(meteo_data, "./EXPORTADO/meteo_data.csv")
+
+# ----- DEPURANDO DATOS METEO -----
+expl_meteo <- meteo_data %>%
+  select(c("prcp", "snow", "snwd", "tmax", "tmin", "tavg"))
+
+corr_meteo <- na.omit(expl_meteo)
+corr_meteo <- cor(corr_meteo)
+
+# Grafica correlaciones
+corrplot(corr_meteo, method = 'number')
+corrplot.mixed(corr_meteo,
+               lower = "number", 
+               upper = "square",
+               tl.col = "black")
+
+# Rechaza hipótesis nula -> tienen relacion entre ellas
+chisq.test(expl_meteo$tmin, expl_meteo$tavg)
+chisq.test(expl_meteo$tmin, expl_meteo$tmax)
+
+# tmin, tmax y tavg muy correlacionadas entre si -> Nos quedamos solo con tmin
+meteo_data_preproc <- meteo_data %>%
+  select(c("id_meteo_st", "date", "prcp", "snow",
+           "snwd", "tmin", "code"))
+
+skim(meteo_data_preproc)
+
+# Ver estaciones con NAs en cada variable
+# PRCP
+prcp_na <- meteo_data_preproc %>% filter(is.na(prcp))
+prcp_na_count <- prcp_na %>% count(code) %>% filter(n > 182)
+prcp_na_count$code
+
+data_sn_prcp <- data_fl_ap_traffic %>%
+  filter(!id_ap_orig %in% prcp_na_count$code &
+           !id_ap_dest %in% prcp_na_count$code)
+
+# 12,06% de obs con más de 300 obs con NA en prcp
+(nrow(data_fl_ap_traffic)-nrow(data_sn_prcp))/nrow(data_fl_ap_traffic)*100
+
+rm(list = c("prcp_na", "data_sn_prcp"))
+
+# SNOW
+snow_na <- meteo_data_preproc %>% filter(is.na(snow))
+snow_na_count <- snow_na %>% count(code) %>% filter(n > 182)
+snow_na_count$code
+
+data_sn_snow <- data_fl_ap_traffic %>%
+  filter(!id_ap_orig %in% snow_na_count$code &
+           !id_ap_dest %in% snow_na_count$code)
+
+# 41,15% de obs con más de 300 obs con NA en prcp
+(nrow(data_fl_ap_traffic)-nrow(data_sn_snow))/nrow(data_fl_ap_traffic)*100
+
+rm(list = c("snow_na", "data_sn_snow"))
+
+# SNWD
+snwd_na <- meteo_data_preproc %>% filter(is.na(snwd))
+snwd_na_count <- snwd_na %>% count(code) %>% filter(n > 182)
+snwd_na_count$code
+
+data_sn_snwd <- data_fl_ap_traffic %>%
+  filter(!id_ap_orig %in% snwd_na_count$code &
+           !id_ap_dest %in% snwd_na_count$code)
+
+# 45,51% de obs con más de 300 obs con NA en prcp
+(nrow(data_fl_ap_traffic)-nrow(data_sn_snwd))/nrow(data_fl_ap_traffic)*100
+
+rm(list = c("snwd_na", "data_sn_snwd"))
+
+# TMIN
+tmin_na <- meteo_data_preproc %>% filter(is.na(tmin))
+tmin_na_count <- tmin_na %>% count(code) %>% filter(n > 182)
+tmin_na_count$code
+
+data_sn_tmin <- data_fl_ap_traffic %>%
+  filter(!id_ap_orig %in% tmin_na_count$code &
+           !id_ap_dest %in% tmin_na_count$code)
+
+# 11,62% de obs con más de 300 obs con NA en tmin --> Las mismas que en tmax
+(nrow(data_fl_ap_traffic)-nrow(data_sn_tmin))/nrow(data_fl_ap_traffic)*100
+
+rm(list = c("tmin_na", "data_sn_tmin"))
+
+# EN RESUMEN, CATEGORIZAR LAS VARIABLES SNOW Y SNWD, IMPUTAR PRCP Y TMIN
+ap_na_count <- c(prcp_na_count$code, tmin_na_count$code)
+ap_na_count <- unique(ap_na_count)
+
+data_sn_na <- data_fl_ap_traffic %>%
+  filter(!id_ap_orig %in% ap_na_count &
+           !id_ap_dest %in% ap_na_count)
+
+# Nº filas con NAs que se eliminaran
+nrow(data_fl_ap_traffic %>%
+       filter(id_ap_orig %in% ap_na_count |
+                id_ap_dest %in% ap_na_count))
+
+# En total un 15,29% de los datos
+(nrow(data_fl_ap_traffic)-nrow(data_sn_na))/nrow(data_fl_ap_traffic)*100
+
+rm(list = c("data_sn_na"))
+
+# Modificaciones en meteo y pasar a clase snow y snwd
+
+meteo_data_imput <- meteo_data %>% select(-c("tmax", "tavg", "rhav"))
+meteo_data_imput <-
+  meteo_data_imput %>%
+  mutate(across(contains("prcp"), function(x) { x / 10 }),
+         across(contains("tmin"), function(x) { x / 10 }),
+         fog = case_when(wt01 == 1 ~ TRUE, TRUE ~ FALSE),
+         thunder = case_when(wt03 == 1 ~ TRUE, TRUE ~ FALSE),
+         highwind = case_when(wt11 == 1 ~ TRUE, TRUE ~ FALSE),
+         hail = case_when(wt05 == 1 ~ TRUE, TRUE ~ FALSE),
+         tornado = case_when(wt10 == 1 ~ TRUE, TRUE ~ FALSE),
+         snow = case_when(snow == 0 ~ "no_snowed",
+                          snow < 125 ~ "little_snowed",
+                          snow >= 125 ~ "lot_snowed",
+                          TRUE ~ "no data"),
+         snwd = case_when(snwd == 0 ~ "no_snowed",
+                          snwd < 500 ~ "little_snowed",
+                          snwd >= 500 ~ "lot_snowed",
+                          TRUE ~ "no data")) %>%
+  select(-contains("wt0"), -contains("wt1"))
+
+id_st <- meteo_data_imput %>% select(id_meteo_st) %>% distinct(id_meteo_st)
+
+# Imputar NA
+meteo_sin_na <- NULL
+options(warn = -1) # Activar warnings con options(warn = 0)
+for (i in 1:nrow(id_st)) {
+  lista <- meteo_data_imput
+  lista <- lista %>% filter(id_meteo_st == id_st$id_meteo_st[i])
+  lista <- lista %>% na_ma(k = 14, weighting = "exponential", maxgap = Inf)
+  meteo_sin_na <- rbind(meteo_sin_na, lista)
+}
+
+# Valores sin NA
+meteo_sin_na_postimput <- meteo_sin_na %>%
+  filter(!is.na(prcp) & !is.na(tmin))
+
+# Estaciones meteo valores únicos sin NA
+code_sin_na_postimput <- meteo_sin_na_postimput %>%
+  select(code) %>% distinct(code)
+
+rm(list = c("code_sin_na_postimput", "corr_expl_meteo", "data_sn_na_postimput",
+            "expl_meteo", "id_st", "lista", "meteo_data", "meteo_data_imput",
+            "meteo_data_preproc", "meteo_sin_na", "meteo_stations",
+            "prcp_na_count", "raw_meteo_data", "snow_na_count", "snwd_na_count",
+            "tmin_na_count", "ap_na_count", "i"))
+
+# ----- INCORPORANDO DATOS METEO -----
+
+cat("Incorporando datos meteo...\n")
+
+# Cruzamos data_fl_ap_traffic (vuelos + ap con coord y tráfico)
+# a meteo_data: unimos a la base de datos de los vuelos
+data_fl_ap_traffic_meteo <-
+  data_fl_ap_traffic %>%
+  # Cruzamos por aeropuerto de origen
+  left_join(meteo_sin_na_postimput,
+            by = c("fl_date" = "date", "id_ap_orig" = "code")) %>%
+  rename(id_station_orig = id_meteo_st, prcp_orig = prcp, snow_orig = snow, 
+         snwd_orig = snwd, tmin_orig = tmin, fog_orig = fog,
+         thunder_orig = thunder, highwind_orig = highwind,
+         hail_orig = hail, tornado_orig = tornado) %>%
+  # Cruzamos por aeropuerto de destino
+  left_join(meteo_sin_na_postimput,
+            by = c("fl_date" = "date", "id_ap_dest" = "code")) %>%
+  rename(id_station_dest = id_meteo_st, prcp_dest = prcp, snow_dest = snow, 
+         snwd_dest = snwd, tmin_dest = tmin, fog_dest = fog,
+         thunder_dest = thunder, highwind_dest = highwind,
+         hail_dest = hail, tornado_dest = tornado)
+
+# Eliminamos los que no se haya encontrado estación meteo en orig o dest
+data_fl_ap_traffic_meteo <-
+  data_fl_ap_traffic_meteo %>%
+  drop_na(id_station_orig, id_station_dest)
+
+rm(list = c("data_fl_ap_traffic", "meteo_sin_na_postimput"))
+
+# Exportamos
+write_csv(data_fl_ap_traffic_meteo, "./EXPORTADO/data_fl_ap_traffic_meteo.csv")
