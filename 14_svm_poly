@@ -1,0 +1,85 @@
+
+# SVM POLINOMICO
+
+recipe_data_dummy <- recipe(data = train_dummy, dep_delay ~ .) %>%
+  # Estandarizar
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  # No seleccionar variables
+  update_role(fl_date, new_role = "date") %>%
+  update_role(arr_delay, new_role = "arr_del") %>%
+  update_role(tail_num, new_role = "tail_num") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Eliminar variables sin varianza
+  step_zv(all_predictors()) %>%
+  # Bajomuestreo
+  themis::step_downsample(dep_delay, under_ratio = 1)
+
+# Modelo
+svm_polyn <- svm_poly(mode = "classification",
+                      engine = "kernlab",
+                      cost = tune("coste"),
+                      degree = tune("deg"),
+                      scale_factor = tune("scale"))
+
+# Flujo de trabajo
+svm_polyn_wf <- workflow() %>%
+  add_recipe(recipe_data_dummy) %>%
+  add_model(svm_polyn)
+
+# Grid
+grid_svm_polyn <- expand.grid(coste = c(0.1),
+                              deg = c(2, 3),
+                              scale = c(0.1, 1))
+
+grid_svm_polyn
+gc()
+
+svm_polyn_tune <-
+  svm_polyn_wf %>%
+  tune_grid(resamples = val_set_dummy, grid = grid_svm_polyn,
+            metrics = metric_set(accuracy, roc_auc))
+
+# Mejores grid
+mejores_grid_svm_polyn <-
+  svm_polyn_tune %>% collect_metrics()%>%
+  pivot_wider(names_from = .metric, values_from = mean)
+mejores_grid_svm_polyn
+
+# Predecir el conjunto test
+modelo_svm_polyn <- svm_polyn_wf %>%
+  update_model(svm_polyn %>% set_args(cost = 0.1,
+                                      degree = 3,
+                                      scale_factor = 0.1)) %>%
+  fit(data = train_dummy)
+
+prob_test_svm_polyn <- augment(modelo_svm_polyn, test_dummy) %>%
+  rename(pred_del_dep = .pred_class)
+
+# Matriz de confusión
+conf_mat_test_smv_polyn <- prob_test_svm_polyn %>%
+  conf_mat(truth = dep_delay, estimate = pred_del_dep)
+conf_mat_test_smv_polyn
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_svm_polyn <-
+  prob_test_svm_polyn %>%
+  multi_metric(truth = dep_delay, estimate = pred_del_dep)
+metrics_test_svm_polyn
+
+roc_auc_svm_polyn <- roc_auc(prob_test_svm_polyn, dep_delay, .pred_FALSE)
+roc_auc_svm_polyn
+
+# Curva ROC:
+roc_curve_smv_polyn <- prob_test_svm_polyn %>%
+  roc_curve(truth = dep_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_smv_polyn, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
