@@ -1,0 +1,78 @@
+
+# REGRESION LOGISTICA
+
+recipe_data_dummy <- recipe(data = train_dummy, dep_delay ~ .) %>%
+  # Estandarizar
+  step_range(all_numeric_predictors(), min = 0, max = 1) %>%
+  # No seleccionar variables
+  update_role(fl_date, new_role = "date") %>%
+  update_role(arr_delay, new_role = "arr_del") %>%
+  update_role(tail_num, new_role = "tail_num") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  # Umbral de correlacion
+  step_corr(all_predictors(), threshold = 0.9) %>%
+  # Eliminar variables sin varianza
+  step_zv(all_predictors()) %>%
+  # Bajomuestreo
+  themis::step_downsample(dep_delay, under_ratio = 1)
+
+# Modelo
+reg_log <- logistic_reg() %>% set_engine("glm")
+
+# Flujo de trabajo
+reg_log_wf <- workflow() %>%
+  add_model(reg_log) %>%
+  add_recipe(recipe_data_dummy)
+
+reg_log_tune <-
+  reg_log_wf %>%
+  tune_grid(resamples = val_set_dummy,
+            metrics = metric_set(accuracy, roc_auc))
+
+# Mejores metricas
+metric_val_reg_log <- reg_log_tune %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean)
+metric_val_reg_log
+
+reg_log_fit <- reg_log_wf %>% fit(data = train_dummy)
+
+# Resumen del modelo
+reg_log_multi <- reg_log_fit %>% extract_fit_engine() 
+reg_log_multi %>% tidy()
+
+reg_log_multi %>% confint()
+
+# Predecir el conjunto test
+prob_test_reg_log <-
+  augment(reg_log_fit, new_data = test_dummy) %>%
+  rename(pred_del_dep = .pred_class)
+prob_test_reg_log
+
+# Matriz de confusión
+conf_mat_test_reg_log <- prob_test_reg_log %>%
+  conf_mat(truth = dep_delay, estimate = pred_del_dep)
+conf_mat_test_reg_log
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_reg_log <-
+  prob_test_reg_log %>%
+  multi_metric(truth = dep_delay, estimate = pred_del_dep)
+metrics_test_reg_log
+
+roc_auc_reg_log <- roc_auc(prob_test_reg_log, dep_delay, .pred_FALSE)
+roc_auc_reg_log
+
+# Curva ROC:
+roc_curve_reg_log <- prob_test_reg_log %>%
+  roc_curve(truth = dep_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_reg_log, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
