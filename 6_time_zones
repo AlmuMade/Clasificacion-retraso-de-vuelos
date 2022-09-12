@@ -1,0 +1,152 @@
+
+# ------ EXTRAER ZONAS HORARIAS DEL DESPEGUE Y ATERRIZAJE ----- 
+
+cat("Extrayendo zonas horarias...\n")
+
+# Extramos zona horaria del despegue y del aterrizaje con la
+# función tz_lookup_coords() del paquete {lutz}.
+# Se puede seleccionar método fast o accurate
+
+# Con accurate
+data_fl_ap_traffic_meteo_tz_preproc <-
+  data_fl_ap_traffic_meteo %>% 
+  mutate(timezone_orig =
+           tz_lookup_coords(lat_ap_orig, lon_ap_orig,
+                            method = "accurate", warn = FALSE),
+         timezone_dest =
+           tz_lookup_coords(lat_ap_dest, lon_ap_dest,
+                            method = "accurate", warn = FALSE))
+
+# Sacar hora sunrise y sunset con getSunlightTimes()
+# del paquete {suncalc}
+sunset_sunrise_orig <- # despegues
+  data_fl_ap_traffic_meteo_tz_preproc %>%
+  distinct(fl_date, lat_ap_orig, lon_ap_orig, timezone_orig) %>% 
+  rowwise() %>% 
+  summarise(getSunlightTimes(date = fl_date,
+                             lat = lat_ap_orig, lon = lon_ap_orig,
+                             keep = c("sunrise", "sunset"),
+                             tz = timezone_orig)) %>% 
+  rename(sunrise_orig = sunrise, sunset_orig = sunset)
+
+sunset_sunrise_dest <- # aterrizajes
+  data_fl_ap_traffic_meteo_tz_preproc %>%
+  distinct(fl_date, lat_ap_dest, lon_ap_dest, timezone_dest) %>% 
+  rowwise() %>%
+  summarise(getSunlightTimes(date = fl_date,
+                             lat = lat_ap_dest, lon = lon_ap_dest,
+                             keep = c("sunrise", "sunset"),
+                             tz = timezone_dest)) %>% 
+  rename(sunrise_dest = sunrise, sunset_dest = sunset)
+
+# Exportamos
+write_csv(sunset_sunrise_orig, file = "./EXPORTADO/sunset_sunrise_orig.csv")
+write_csv(sunset_sunrise_dest, file = "./EXPORTADO/sunset_sunrise_dest.csv")
+
+# Cruzamos datos
+data_fl_ap_traffic_meteo_tz_preproc <-
+  data_fl_ap_traffic_meteo_tz_preproc %>% 
+  left_join(sunset_sunrise_orig,
+            by = c("fl_date" = "date",
+                   "lat_ap_orig" = "lat",
+                   "lon_ap_orig" = "lon")) %>% 
+  left_join(sunset_sunrise_dest,
+            by = c("fl_date" = "date",
+                   "lat_ap_dest" = "lat",
+                   "lon_ap_dest" = "lon"))
+
+# Exportamos
+write_csv(data_fl_ap_traffic_meteo_tz_preproc,
+          file = "./EXPORTADO/data_fl_ap_traffic_meteo_tz_preproc.csv")
+
+rm(list = c("sunset_sunrise_orig", "sunset_sunrise_dest",
+            "data_fl_ap_traffic_meteo"))
+
+# ----- ¿VUELO SALE O LLEGA DE NOCHE? ------ 
+
+cat("¿Vuelo sale o llega de noche?...\n")
+
+# Formateamos horas
+data_fl_ap_traffic_meteo_tz <- 
+  data_fl_ap_traffic_meteo_tz_preproc %>% 
+  mutate(sunrise_orig = 
+           hms::hms(sec = as.numeric(substr(as.character(sunrise_orig),
+                                            star = 18, stop = 20)),
+                    min = as.numeric(substr(as.character(sunrise_orig),
+                                            star = 15, stop = 16)),
+                    hours = as.numeric(substr(as.character(sunrise_orig),
+                                              star = 12, stop = 13))),
+         sunset_orig = 
+           hms::hms(sec = as.numeric(substr(as.character(sunset_orig),
+                                            star = 18, stop = 20)),
+                    min = as.numeric(substr(as.character(sunset_orig),
+                                            star = 15, stop = 16)),
+                    hours = as.numeric(substr(as.character(sunset_orig),
+                                              star = 12, stop = 13))),
+         sunrise_dest = 
+           hms::hms(sec = as.numeric(substr(as.character(sunrise_dest),
+                                            star = 18, stop = 20)),
+                    min = as.numeric(substr(as.character(sunrise_dest),
+                                            star = 15, stop = 16)),
+                    hours = as.numeric(substr(as.character(sunrise_dest),
+                                              star = 12, stop = 13))),
+         sunset_dest = 
+           hms::hms(sec = as.numeric(substr(as.character(sunset_dest),
+                                            star = 18, stop = 20)),
+                    min = as.numeric(substr(as.character(sunset_dest),
+                                            star = 15, stop = 16)),
+                    hours = as.numeric(substr(as.character(sunset_dest),
+                                              star = 12, stop = 13))))
+
+# Decir si el vuelo sale o llega a partir de las 00:00
+data_fl_ap_traffic_meteo_tz <-
+  data_fl_ap_traffic_meteo_tz %>% 
+  mutate(orig_night =
+           case_when((dep_plann_time < sunrise_orig &
+                        dep_plann_time > "00:00:00")|
+                       (dep_plann_time < "00:00:00" &
+                          dep_plann_time > sunset_orig) ~ "Yes",
+                     TRUE ~ "No"),
+         dest_night =
+           case_when((arr_plann_time < sunrise_dest &
+                        arr_plann_time > "00:00:00")|
+                       (arr_plann_time < "00:00:00" &
+                          arr_plann_time > sunset_dest) ~ "Yes",
+                     TRUE ~ "No"))
+
+# Exportamos
+write_csv(data_fl_ap_traffic_meteo_tz,
+          "./EXPORTADO/data_fl_ap_traffic_meteo_tz.csv")
+
+rm(list = c("data_fl_ap_traffic_meteo_tz_preproc"))
+
+
+# ----- CODIFICAR FESTIVOS -----
+
+cat("Codificar festivos...\n")
+
+# Cruzamos datos vuelos+trafico+meteo+tz con free_days
+data_fl_ap_traffic_meteo_tz_hd <-
+  data_fl_ap_traffic_meteo_tz %>%
+  # Origen
+  left_join(free_days, by = c("fl_date" = "date",
+                              "orig_state" = "state_abbrev")) %>% 
+  # Si no tienen NA en holy --> festivo
+  mutate(free_day_orig = !is.na(holy)) %>% 
+  select(-(state:main_city)) %>% 
+  # Destino
+  left_join(free_days, by = c("fl_date" = "date",
+                              "dest_state" = "state_abbrev")) %>% 
+  # Si no tienen NA en holy --> festivo
+  mutate(free_day_dest = !is.na(holy)) %>% 
+  select(-(state:main_city)) %>%
+  # Eliminar duplicados
+  distinct(fl_date, tail_num, id_ap_orig, id_ap_dest,
+           dep_plann_time, arr_plann_time, .keep_all = TRUE)
+
+rm(list = c("data_ap_coord", "data_fl_ap_traffic_meteo_tz",
+            "free_days","states_USA", "unique_ap"))
+
+# Exportamos
+write_csv(data_fl_ap_traffic_meteo_tz_hd,
+          "./EXPORTADO/data_fl_ap_traffic_meteo_tz_hd.csv")
