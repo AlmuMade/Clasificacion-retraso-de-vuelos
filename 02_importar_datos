@@ -1,6 +1,9 @@
 
 # ----- DATOS DE VUELOS -----
 
+# Datos extraidos de la web:
+# https://www.transtats.bts.gov/DL_SelectFields.aspx?gnoyr_VQ=FGJ&QO_fu146_anzr=
+
 # Nombre archivos .csv
 name_files <- glue("19_{c(glue('0{1:9}'), 10:12)}")
 
