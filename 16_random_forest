@@ -1,0 +1,83 @@
+
+# RANDOM FOREST
+
+recipe_dep <- recipe(data = train_dep, arr_delay ~ .) %>% 
+  # No seleccionar fecha
+  update_role(fl_date, new_role = "date") %>%
+  # No seleccionar matrícula
+  update_role(tail_num, new_role = "tail") %>%
+  update_role(name_ap_orig, new_role = "ap") %>%
+  update_role(name_ap_dest, new_role = "ap") %>%
+  step_other(all_nominal_predictors(), threshold = 0.03) %>%
+  themis::step_downsample(arr_delay, under_ratio = 1) %>%
+  # # Eliminar variables sin varianza
+  step_zv(all_predictors())
+
+# Modelo
+clusters <- detectCores() - 1
+rforest <- rand_forest(mtry = tune(),
+                       min_n = tune(),
+                       trees = 100) %>% 
+  set_engine("ranger", num.threads = clusters) %>% 
+  set_mode("classification")
+
+# Flujo de trabajo
+rf_wflow <-
+  workflow() %>%
+  add_recipe(recipe_dep) %>%
+  add_model(rforest)
+
+rf_tune_par <- 
+  rf_wflow %>% 
+  tune_grid(resamples = val_set_dep, grid = 10,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(accuracy, sensitivity,
+                                 specificity, roc_auc))
+
+registerDoSEQ()
+
+# Mejores grid
+mejores_grid_rf <-
+  rf_tune_par %>% collect_metrics() %>%
+  pivot_wider(names_from = .metric, values_from = mean) %>%
+  arrange(desc(sensitivity))
+mejores_grid_rf
+
+# Predecir el conjunto test
+modelo_rf <- rf_wflow %>%
+  update_model(rforest %>% set_args(mtry = 341,
+                                    min_n = 11,
+                                    trees = 100)) %>%
+  fit(data = train_dep)
+
+prob_test_rf <- augment(modelo_rf, test_dep) %>%
+  rename(pred_del_arr = .pred_class)
+prob_test_rf
+
+# Matriz de confusión
+conf_mat_test_rf <- prob_test_rf %>%
+  conf_mat(truth = arr_delay, estimate = pred_del_arr)
+conf_mat_test_rf
+
+# Métricas
+multi_metric <- metric_set(accuracy, sensitivity, specificity)
+metrics_test_rf <-
+  prob_test_rf%>%
+  multi_metric(truth = arr_delay, estimate = pred_del_arr)
+metrics_test_rf
+
+roc_auc_test_rf <- roc_auc(prob_test_rf, arr_delay, .pred_FALSE)
+roc_auc_test_rf
+
+# Curva ROC:
+roc_curve_test_rf <- prob_test_rf %>%
+  roc_curve(truth = arr_delay, estimate = .pred_FALSE)
+
+# Curva ROC
+ggplot(roc_curve_test_rf, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_line(lwd = 2, alpha = 0.85, color = "#0078D2") +
+  geom_abline(lty = 4) + coord_equal() +
+  scale_x_continuous(labels = scales::percent) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "1 - especificidad (proporción falsos positivos)\n",
+       y = "\nsensibilidad (proporción verdaderos positivos)") + tema_graficos
