@@ -1,0 +1,87 @@
+
+# Imputamos estaciones del año en función de fecha
+final_data <-
+  data_fl_ap_traffic_meteo_tz_hd %>% 
+  mutate(season =
+           case_when(between(fl_date, as_date("2019-03-21"),
+                             as_date("2019-06-20")) ~ "spring",
+                     between(fl_date, as_date("2019-06-21"),
+                             as_date("2019-09-20")) ~ "summer",
+                     between(fl_date, as_date("2019-09-21"),
+                             as_date("2019-12-20")) ~ "autumn",
+                     between(fl_date, as_date("2019-12-21"),
+                             as_date("2019-12-31")) ~ "winter",
+                     between(fl_date, as_date("2019-01-01"),
+                             as_date("2019-03-20")) ~ "winter"))
+
+# Exportamos
+write_csv(final_data, "./EXPORTADO/final_data_full.csv")
+
+rm(list = c("data_fl_ap_traffic_meteo_tz_hd"))
+
+# Tabla final
+final_data <-
+  read_csv(file = "./EXPORTADO/final_data_full.csv")
+
+final_data %>% count(cancelled)
+
+# TODOS son 0 (deberían)
+final_data <-
+  final_data %>% select(-cancelled)
+
+# Columnas name_ap_orig y id_ap_orig, son iguales lo que
+# pasa que es una sale el nombre de ap y en otra el id
+final_data <-
+  final_data %>% 
+  mutate(name_ap_orig =
+           glue("{name_ap_orig} ({id_ap_orig})"),
+         name_ap_dest =
+           glue("{name_ap_dest} ({id_ap_dest})")) %>% 
+  select(-c(id_ap_orig, id_ap_dest))
+
+# station_orig y station_dest tampoco nos van a dar
+# mucha info, tras extraer info de la meteo mas cercana,
+final_data <- 
+  final_data %>%
+  select(-c(id_station_orig, id_station_dest))
+
+# dep_time: hora real de despegue
+# dep_plann_time: hora planeada de despegue
+# dep_delay_time: la diferencia de ambas
+# Podemos eliminar una (dep_time)
+final_data <- 
+  final_data %>%
+  select(-dep_time, -arr_time)
+
+# Eliminamos coordenadas del aeropuerto para reducir dimensión
+final_data <- 
+  final_data %>%
+  select(-contains("lon_ap"), -contains("lat_ap"))
+
+# El tiempo de vuelo real nunca lo vamos a saber
+# hasta que llegue (solo sabemos a priori el planeado)
+final_data <- 
+  final_data %>% select(-elap_time_fl)
+
+# Pasamos a TRUE / FALSE dep_delay y arr_delay
+final_data <-
+  final_data %>%
+  mutate(dep_delay = dep_delay == 1,
+         arr_delay = arr_delay == 1)
+
+# Restringimos temperaturas por rango
+final_data <-
+  final_data %>% 
+  mutate(tmin_dest = ifelse(tmin_dest >= -30 & tmin_dest <= 50,
+                            tmin_dest, NA),
+         prcp_dest = ifelse(prcp_dest >= 0, prcp_dest, NA),
+         tmin_orig = ifelse(tmin_orig >= -30 & tmin_orig <= 50,
+                            tmin_orig, NA),
+         prcp_orig = ifelse(prcp_orig >= 0, prcp_orig, NA))%>%
+  distinct(fl_date, tail_num, name_ap_orig, name_ap_dest,
+           dep_plann_time, arr_plann_time, .keep_all = TRUE) %>%
+  drop_na(c("prcp_orig", "tmin_orig", "prcp_dest", "tmin_dest"))
+         
+
+# Exportamos
+write_csv(final_data, file = "./EXPORTADO/final_data.csv")
