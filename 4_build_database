@@ -1,0 +1,121 @@
+
+# ----- TRAFICO AEREO -----
+
+cat("Calculando estadísticas de trafico aereo...\n")
+
+# Nº de vuelos por fecha e id_aeropuerto en origen
+fl_by_date_orig <-
+  data_preproc_fl %>%
+  group_by(fl_date, id_ap_orig) %>%
+  tally() %>% 
+  ungroup()
+
+# Nº de vuelos por fecha e id_aeropuerto en destino
+fl_by_date_dest <-
+  data_preproc_fl %>%
+  group_by(fl_date, id_ap_dest) %>%
+  tally() %>% 
+  ungroup()
+
+# Incluimos en data_preproc_fl tráfico aéreo para ap de origen
+data_fl_traffic <-
+  data_preproc_fl %>%
+  left_join(fl_by_date_orig, by = c("fl_date", "id_ap_orig")) %>% 
+  rename(ap_orig_as_dep_traffic = n) %>%
+  left_join(fl_by_date_dest, by = c("fl_date", "id_ap_orig" = "id_ap_dest")) %>%
+  rename(ap_orig_as_arr_traffic = n) %>%
+  # Incluimos en data_preproc_fl tráfico aéreo para ap de destino
+  left_join(fl_by_date_dest, by= c ("fl_date", "id_ap_dest")) %>%
+  rename(ap_dest_as_arr_traffic = n) %>% 
+  left_join(fl_by_date_orig, by = c("fl_date", "id_ap_dest" = "id_ap_orig")) %>%
+  rename(ap_dest_as_dep_traffic = n)
+
+# Sumar tráfico de arrival y departure para ap de origen y destino
+data_fl_traffic <-
+  data_fl_traffic %>% 
+  # Antes hacemos NA --> 0
+  mutate(across(contains("as_dep") | contains("as_arr"),
+                function(x) { replace_na(x, 0)})) %>% 
+  mutate(total_traffic_orig = ap_orig_as_dep_traffic + ap_orig_as_arr_traffic,
+         total_traffic_dest = ap_dest_as_dep_traffic + ap_dest_as_arr_traffic)
+
+# Eliminamos variables que no necesitamos ya
+data_fl_traffic <-
+  data_fl_traffic %>% 
+  select(-c(contains("as_dep"), contains("as_arr")))
+
+# Eliminamos tablas que no necesitamos ya
+rm(list = c("fl_by_date_orig", "fl_by_date_dest", "data_preproc_fl"))
+
+# Exportamos
+write_csv(data_fl_traffic,
+          file = "./EXPORTADO/data_fl_traffic.csv")
+
+
+# ----- AEROPUERTOS + ESTADOS + COORDENADAS -----
+
+cat("Cruce de tablas diccionario aeropuertos + estados + cordenadas...\n")
+
+# Left join: diccionario ap + info de estados
+data_ap <- 
+  id_ap %>%
+  left_join(states_USA, by = "state_abbrev") %>% 
+  # Eliminamos ap duplicados que tengan mismo nombre en el mismo estado
+  distinct(state_abbrev, name_ap, .keep_all = TRUE) %>% 
+  # Eliminamos los que tengan state_name vacio (no pertencen a USA)
+  drop_na(state_name)
+
+# Actualizamos los aeropuertos únicos donde aterrizan o despegan vuelos
+# y le añadimos la info del diccionario (aeropuertos + estados)
+data_ap <-
+  unique_ap %>%
+  left_join(data_ap, by = "code") %>%
+  distinct(code, name_ap, state_abbrev, .keep_all = TRUE)
+
+# Left join: data aeropuertos + coordenadas
+data_ap_coord <-
+  data_ap %>%
+  left_join(coord_ap, by = c("name_ap", "state_abbrev")) %>% 
+  # Eliminamos duplicados de aeropuertos iguales en mismo estado
+  distinct(code, state_abbrev, name_ap, .keep_all = TRUE) %>% 
+  drop_na(lon, lat)
+
+# Exportamos datos aeropuertos con estados y coordenadas
+write_csv(data_ap_coord, "./EXPORTADO/data_ap_coord.csv")
+
+
+# ----- VUELOS + AEROPUERTOS (+ ESTADOS + COORD) -----
+
+cat("Cruce vuelos + datos ap (estados + coord)...\n")
+# Cruzamos datos de vuelos + datos ap (con coord) cruzando
+# por ap de origen y destino
+data_fl_ap_traffic <-
+  data_fl_traffic %>% 
+  left_join(data_ap_coord, by = c("id_ap_orig" = "code")) %>% 
+  # Seleccionamos variables
+  select(-c(mun, state_abbrev, state_name, main_city,  
+            ident, iso_country)) %>% 
+  # Renombramos por ap de origen
+  rename(name_ap_orig = name_ap, type_ap_orig = type,
+         elevation_orig = elevation_ft,
+         lon_ap_orig = lon, lat_ap_orig = lat) %>% 
+  left_join(data_ap_coord, by = c("id_ap_dest" = "code")) %>% 
+  # Seleccionamos variables
+  select(-c(mun, state_abbrev, state_name, main_city,  
+            ident, iso_country)) %>% 
+  # Renombramos por ap de destino
+  rename(name_ap_dest = name_ap, type_ap_dest = type,
+         elevation_dest = elevation_ft,
+         lon_ap_dest = lon, lat_ap_dest = lat)
+
+# Eliminamos de nuevo filas que no tengan datos de
+# coordenadas de origen o destino y que no haya datos
+# del retraso en destino (--> cancelados)
+data_fl_ap_traffic <- 
+  data_fl_ap_traffic %>%
+  drop_na(lon_ap_orig, lon_ap_dest, arr_delay)
+
+# Exportamos
+write_csv(data_fl_ap_traffic, "./EXPORTADO/data_fl_ap_traffic.csv")
+
+rm(list = c("coord_ap", "data_ap", "data_fl_traffic", "id_ap"))
