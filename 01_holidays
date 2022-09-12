@@ -104,7 +104,7 @@ for k in festivos:
         print("Comprobar filas de la tabla")
 
 #with open("lista_estados.pickle", "wb") as f:
-#    pickle.dump(lista_estados, f)
+#    pickle.dump(lista_estados, f) 
 #with open("festivos_bruto.pickle", "wb") as f:
 #    pickle.dump(festivos, f)
 
