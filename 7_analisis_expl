@@ -1,0 +1,439 @@
+
+final_data <- read_csv("./EXPORTADO/final_data.csv")
+
+# Transformar variables night
+final_data <- final_data %>%
+  ungroup() %>%
+  mutate(orig_night = ifelse(orig_night == "No", FALSE, TRUE),
+         dest_night = ifelse(dest_night== "No", FALSE, TRUE))
+
+# Tema para los gráficos
+
+# Letra calibri
+font_add(family = "Calibri", regular = "Calibri.ttf")
+showtext_auto()
+
+tema_graficos <-
+  theme_classic() +
+  theme(text = element_text(family = "Calibri", size = 16),
+        plot.title = element_text(hjust = 0.5, face = "bold"),
+        plot.caption.position = "plot")
+
+paleta_color <- scale_color_manual(values = c("#0078D2", "#C30019", "#36495A",
+                                              "#9DA6AB", "#131313", "#FFFFFF",
+                                              "lightblue"))
+paleta_fill <- scale_fill_manual(values = c("#0078D2", "#C30019", "#36495A",
+                                              "#9DA6AB", "#131313", "#FFFFFF",
+                                              "lightblue"))
+
+skim(final_data)
+# Se observa que hay el mismo num de aeropuertos que de ciudades, por lo que
+# asumimos que solo hay un aeropuerto por ciudad y que es la misma var
+# no se utilizará ciudad para el modelado
+chisq.test(final_data$name_ap_orig, final_data$orig_city)
+chisq.test(final_data$name_ap_dest, final_data$dest_city)
+
+# Las variables orig_night y dest_night son sacadas de sunrise y sunset
+# deperían ser dependientes y por lo tanto con orig_night y dest_night vales
+chisq.test(final_data$orig_night, final_data$sunrise_orig)
+chisq.test(final_data$orig_night, final_data$sunset_orig)
+chisq.test(final_data$dest_night, final_data$sunrise_dest)
+chisq.test(final_data$dest_night, final_data$sunset_dest)
+
+# Dist y elap_plann_time_fl correlacion de 90%
+# Grafica
+final_data_num <- final_data %>% select_if(is.numeric)
+
+# formas
+corrplot(cor(final_data_num), type = "upper", 
+         tl.pos = "lt", tl.offset = 1, tl.col = "black", tl.srt = 45)
+# números
+corrplot(cor(final_data_num), add = T, type = "lower", method = "number",
+         col = "black", diag = F, tl.pos="n", tl.col="black", number.cex = .6)
+
+# Var num para horas
+final_data_sampled <- final_data %>%
+  select(-c(orig_city, dest_city, elap_plann_time_fl,
+            sunrise_orig, sunrise_dest, sunset_orig,
+            sunset_dest, timezone_orig, timezone_dest)) %>%
+  mutate(num_dep_plann_time = unclass(dep_plann_time),
+         num_arr_plann_time = unclass(arr_plann_time)) %>%
+  relocate(num_dep_plann_time, .after = dep_plann_time) %>%
+  relocate(num_arr_plann_time, .after = arr_plann_time)
+
+# ---- Aeropuertos ----
+# Vuelos despegan
+fl_ap_orig <- final_data %>% count(name_ap_orig)
+
+# Vuelos aterizan
+fl_ap_dest <- final_data %>% count(name_ap_dest)
+
+# Total vuelos
+fl_ap <- fl_ap_orig %>%
+  left_join(fl_ap_dest, by = c("name_ap_orig" = "name_ap_dest"))%>%
+  rename(name_ap = name_ap_orig, fl_orig = n.x, fl_dest = n.y) %>%
+  mutate(fl_total = fl_orig + fl_dest) %>% arrange(desc(fl_total)) %>%
+  mutate(name_ap = substring(name_ap, 1, nchar(name_ap)-8)) %>%
+  distinct(name_ap, .keep_all = TRUE)
+
+# Top 10 aeropuertos con mas vuelos
+top_n(fl_ap, 10, fl_total) %>%
+  mutate(name_ap = fct_reorder(name_ap, desc(fl_total))) %>%
+  ggplot() +
+  aes(x = name_ap, y = fl_total) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::comma,
+                     breaks = seq(0, 600000, 100000)) +
+  scale_x_discrete(labels = abbreviate) +
+  labs(x = "\nAeropuertos", y = "") + guides(fill = FALSE) +
+  tema_graficos
+
+# Top 10 aeropuertos con menos vuelos
+top_n(fl_ap, -10, fl_total) %>%
+  mutate(name_ap = fct_reorder(name_ap, desc(fl_total))) %>%
+  ggplot() +
+  aes(x = name_ap, y = fl_total) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::comma, limit = c(0, 500),
+                     breaks = seq(0, 500, 100)) +
+  scale_x_discrete(labels = abbreviate) +
+  labs(x = "\nAeropuertos", y = "") + guides(fill = FALSE) +
+  geom_vline(xintercept = 7.5, size = 1,
+             linetype="dashed", color = "#C30019") +
+  # Etiqueta numero de vuelos
+  geom_label(data = tail(fl_ap, 3),
+             aes(label = scales::comma(round(fl_total, 0))),
+             size = 4, alpha = 0, label.size = 0,
+             position = position_dodge(), vjust = -0.25) +
+  tema_graficos
+
+# Quitamos los aeropuertos con menos de un vuelo cada dos días
+fl_ap <- fl_ap_orig %>%
+  left_join(fl_ap_dest, by = c("name_ap_orig" = "name_ap_dest"))%>%
+  rename(name_ap = name_ap_orig, fl_orig = n.x, fl_dest = n.y) %>%
+  mutate(total = fl_orig + fl_dest) %>% distinct(name_ap, .keep_all = TRUE)
+
+ap_less_fl <- fl_ap %>% filter(total < 122)
+
+final_data_sampled <- final_data_sampled %>%
+  filter(!name_ap_orig %in% ap_less_fl$name_ap &
+           !name_ap_dest %in% ap_less_fl$name_ap)
+
+rm(list = c("ap_less_fl", "final_data", "fl_ap", "fl_ap_dest", "fl_ap_orig"))
+
+# ----Frecuencia de aeropuertos -- menos aparecen en la tabla----
+# Origen
+freq_ap_orig <- final_data_sampled %>% count(name_ap_orig) %>%
+  mutate(porc = n/sum(n))
+
+# Frecuencia general
+ggplot(freq_ap_orig) + aes(x = porc) +
+  geom_histogram(bins = 30, fill = "#0078D2", color = "white")+
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.07, 0.005)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Menos del 1%
+freq_ap_orig %>% filter(porc < 0.01) %>%
+  ggplot() + aes(x = porc) +
+  geom_histogram(bins = 30, fill = "#0078D2", color = "white") +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.01, 0.001)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Destino
+freq_ap_dest <- final_data_sampled %>% count(name_ap_dest) %>%
+  mutate(porc = n/sum(n))
+
+# Frecuencia general
+ggplot(freq_ap_dest) + aes(x = porc) +
+  geom_histogram(bins = 30, fill = "#0078D2", color = "white")+
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.07, 0.005)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Menos del 1%
+freq_ap_dest %>% filter(porc < 0.01) %>%
+  ggplot() + aes(x = porc) +
+  geom_histogram(bins = 30, fill = "#0078D2", color = "white") +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.01, 0.001)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Filtramos y quitamos los que tienen una frecuencia menor a 0.02%
+freq_ap_orig <- final_data_sampled %>% count(name_ap_orig) %>%
+  mutate(porc = 100*n/sum(n)) %>% filter(porc < 0.02)
+
+freq_ap_dest <- final_data_sampled %>% count(name_ap_dest) %>%
+  mutate(porc = 100*n/sum(n)) %>% filter(porc < 0.02)
+
+final_data_sampled <- final_data_sampled %>%
+  filter(!name_ap_orig %in% freq_ap_orig$name_ap_orig &
+           !name_ap_dest %in% freq_ap_dest$name_ap_dest)
+
+# ----Frecuencia de estados -- menos aparecen en la tabla----
+# Origen
+freq_st_orig <- final_data_sampled %>% count(orig_state) %>%
+  mutate(porc = n/sum(n))
+
+# Frecuencia general
+ggplot(freq_st_orig) + aes(x = porc) +
+  geom_histogram(bins = 28, fill = "#0078D2", color = "white")+
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.14, 0.01)) +
+  scale_y_continuous(breaks = seq(0, 10, 2)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Menos del 1%
+freq_st_orig %>% filter(porc < 0.01) %>%
+  ggplot() + aes(x = porc) +
+  geom_histogram(bins = 10, fill = "#0078D2", color = "white") +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.01, 0.002)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Destino
+freq_st_dest <- final_data_sampled %>% count(dest_state) %>%
+  mutate(porc = n/sum(n))
+
+# Frecuencia general
+ggplot(freq_st_dest) + aes(x = porc) +
+  geom_histogram(bins = 28, fill = "#0078D2", color = "white")+
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.14, 0.01)) +
+  scale_y_continuous(breaks = seq(0, 10, 2)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Menos del 1%
+freq_st_dest %>% filter(porc < 0.01) %>%
+  ggplot() + aes(x = porc) +
+  geom_histogram(bins = 10, fill = "#0078D2", color = "white") +
+  scale_x_continuous(labels = scales::percent, breaks = seq(0, 0.01, 0.002)) +
+  labs(x = "\nFrecuencia", y = "") + tema_graficos
+
+# Filtramos y quitamos los que tienen una frecuencia menor a 0.1%
+freq_st_orig <- final_data_sampled %>% count(orig_state) %>%
+  mutate(porc=100*n/sum(n)) %>% filter(porc < 0.1)
+
+freq_st_dest <- final_data_sampled %>% count(dest_state) %>%
+  mutate(porc=100*n/sum(n)) %>% filter(porc < 0.1)
+
+final_data_sampled <- final_data_sampled %>%
+  filter(!orig_state %in% freq_st_orig$orig_state &
+           !dest_state %in% freq_st_dest$dest_state)
+
+# Realizamos un sampleado manteniendo la distribucion de month y dep_delay
+# porque siguen siendo muchos datos -- nos quedamos con un 2%
+
+set.seed(1996)
+initial_sample <- final_data_sampled %>%
+  group_by(month) %>%
+  initial_split(strata = arr_delay, prop = 0.02)
+
+# Datos finales
+set.seed(1996)
+final_data_sampled <- training(initial_sample)
+final_data_sampled <- final_data_sampled %>% ungroup()
+
+# Exportamos
+write_csv(final_data_sampled, file = "./EXPORTADO/final_data_sampled.csv")
+
+# ---- ANÁLISIS EXPLORATORIO DE LOS DATOS SAMPLEADOS ----
+
+# ---- Aerolineas ----
+# Aerolinea con más y menos retraso
+carrier_delay <- final_data_sampled %>% filter(arr_delay == TRUE) %>%
+  count(carrier, arr_delay) %>% mutate(porc = n/sum(n)) %>% arrange(desc(porc))
+
+# Más retraso
+top_n(carrier_delay, 5, porc) %>%
+  mutate(carrier = fct_reorder(carrier, desc(porc))) %>%
+  ggplot() +
+  aes(x = carrier, y = porc) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::percent, limit = c(0, 0.2),
+                     breaks = seq(0, 0.20, 0.05)) +
+  labs(x = "\nAerolíneas", y = "") + guides(fill = FALSE) + tema_graficos
+
+# Menos retraso
+top_n(carrier_delay, -5, porc) %>%
+  mutate(carrier = fct_reorder(carrier, desc(porc))) %>%
+  ggplot() +
+  aes(x = carrier, y = porc) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::percent, limit = c(0, 0.075),
+                     breaks = seq(0, 0.075, 0.025)) +
+  labs(x = "\nAerolíneas", y = "") + guides(fill = FALSE) + tema_graficos
+
+
+# Aerolinea con más y menos % de retraso
+porc_carrier_delay <-final_data_sampled %>% count(carrier, arr_delay) %>%
+  mutate(arr_delay = ifelse(arr_delay==FALSE, "no_delay", "delay")) %>%
+  pivot_wider(names_from = arr_delay, values_from = n) %>%
+  mutate(total_fl = no_delay + delay, porc_delay = delay/total_fl) %>%
+  select(-c(no_delay, delay, total_fl)) %>% arrange(desc(porc_delay))
+
+# Más retraso
+top_n(porc_carrier_delay, 5, porc_delay) %>%
+  mutate(carrier = fct_reorder(carrier, desc(porc_delay))) %>%
+  ggplot() +
+  aes(x = carrier, y = porc_delay) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::percent,
+                     breaks = seq(0, 0.25, 0.05)) +
+  labs(x = "\nAerolineas", y = "") + guides(fill = FALSE) + tema_graficos
+
+# Menos retraso
+top_n(porc_carrier_delay, -5, porc_delay) %>%
+  mutate(carrier = fct_reorder(carrier, desc(porc_delay))) %>%
+  ggplot() +
+  aes(x = carrier, y = porc_delay) + geom_col(fill = "#0078D2") +
+  scale_y_continuous(labels = scales::percent, limit = c(0, 0.25),
+                     breaks = seq(0, 0.25, 0.05)) +
+  labs(x = "\nAerolineas", y = "") + guides(fill = FALSE) + tema_graficos
+
+# ---- Estados ----
+
+# Vuelos por estado al día
+# Bordes de estados extraidos de:
+# https://www.census.gov/geographies/mapping-files/time-series/geo/cartographic-boundary.html
+mapa_lines <- readOGR(dsn = "DATOS/cb_2021_us_state_500k.shp")
+
+mapa_fortified <- fortify(mapa_lines, region = "NAME")
+mapa_fortified <- mapa_fortified %>% mutate(id = str_to_upper(id))
+
+states_USA <- read_csv("./EXPORTADO/states_USA.csv",
+                       progress = FALSE, show_col_types = FALSE)
+
+states_fl <- final_data_sampled %>%
+  left_join(states_USA, by = c("orig_state" = "state_abbrev")) %>% 
+  select(c(state_name, total_traffic_orig)) %>%
+  group_by(state_name)%>%
+  tally() %>% arrange(desc(n))
+
+mapa_graficar <- mapa_fortified %>%
+  left_join(states_fl, by = c("id" = "state_name")) %>% 
+  arrange(order) %>%
+  dplyr::rename(fl = n) %>%
+  mutate(fl = fl/365)
+
+ggplot(mapa_graficar) + aes(x = long, y = lat, group = group, fill = fl) +
+  geom_map(aes(map_id = id), map = mapa_graficar, color = "white") +
+  expand_limits(x = mapa_graficar$long, y = mapa_graficar$lat) +
+  # geom_label_repel(aes(label = id)) +
+  scale_fill_continuous(labels = scales::comma) +
+  scale_fill_gradientn(colors = c("lightblue", "#0078D2")) +
+  scale_x_continuous(limits = c(-175, -55)) +
+  scale_y_continuous(limits = c(25, 70)) +
+  labs(fill = "") + theme_void() + theme(legend.position = "bottom",
+                                         legend.key.height = unit(1, 'cm'),
+                                         legend.key.width= unit(2, 'cm'))
+
+# Retrasos por estado
+# Bordes de estados extraidos de:
+# https://www.census.gov/geographies/mapping-files/time-series/geo/cartographic-boundary.html
+mapa_lines <- readOGR(dsn = "./DATOS/cb_2021_us_state_500k.shp")
+
+mapa_fortified <- fortify(mapa_lines, region = "NAME")
+mapa_fortified <- mapa_fortified %>% mutate(id = str_to_upper(id))
+
+states_USA <- read_csv("./EXPORTADO/states_USA.csv",
+                       progress = FALSE, show_col_types = FALSE)
+
+states_delay <- final_data_sampled %>%
+  count(dest_state, dep_delay) %>%
+  dplyr::rename(state = dest_state) %>%
+  mutate(dep_delay = ifelse(dep_delay == TRUE,
+                            dep_delay <- "delay",
+                            dep_delay <- "not_delay")) %>%
+  pivot_wider(names_from = dep_delay, values_from = n) %>%
+  mutate(total_fl = delay + not_delay, perc_delay = delay/total_fl) %>%
+  arrange(desc(perc_delay))
+
+states_fl <- states_delay %>%
+  left_join(states_USA, by = c("state" = "state_abbrev")) %>% 
+  select(c(state_name, perc_delay))
+
+mapa_graficar <- mapa_fortified %>%
+  left_join(states_fl, by = c("id" = "state_name")) %>% 
+  arrange(order)
+
+ggplot(mapa_graficar) + aes(x = long, y = lat, group = group, fill = perc_delay) +
+  geom_map(aes(map_id = id), map = mapa_graficar, color = "white") +
+  expand_limits(x = mapa_graficar$long, y = mapa_graficar$lat) +
+  # geom_label_repel(aes(label = id)) +
+  scale_fill_continuous(labels = scales::comma) +
+  scale_fill_gradientn(colors = c("lightblue", "#0078D2")) +
+  scale_x_continuous(limits = c(-175, -55)) +
+  scale_y_continuous(limits = c(25, 70)) +
+  labs(fill = "") + theme_void() + theme(legend.position = "bottom",
+                                         legend.key.height = unit(1, 'cm'),
+                                         legend.key.width= unit(2, 'cm'))
+
+# ---- Mes ----
+ggplot(final_data_sampled) + aes(x = month) + geom_bar(fill = "#0078D2") +
+  scale_x_continuous(breaks = seq(1, 12, 1))  + labs(x = "\nMes", y = "") +
+  guides(fill = FALSE) + tema_graficos
+
+ggplot(final_data_sampled) + aes(x = month, fill = arr_delay) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(1, 12, 1))  +
+  labs(x = "\nMes", y = "", fill = "Retraso") +
+  tema_graficos + paleta_fill
+
+
+# ---- Dia de la semana ----
+
+ggplot(final_data_sampled) + aes(x = day_week) + geom_bar(fill = "#0078D2") +
+  scale_x_continuous(breaks = seq(1, 12, 1))  +
+  labs(x = "\nDía de la semana", y = "") +
+  guides(fill = FALSE) + tema_graficos
+
+ggplot(final_data_sampled) + aes(x = day_week, fill = arr_delay) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = seq(1, 12, 1))  +
+  labs(x = "\nDía de la semana", y = "", fill = "Retraso") +
+  tema_graficos + paleta_fill
+
+# ---- Festivos ----
+ggplot(final_data_sampled) + aes(x = factor(free_day_dest), fill = arr_delay) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "\nDía festivo en destino", y = "", fill = "Retraso en destino") +
+  tema_graficos + paleta_fill
+
+# ---- Tiempo retraso y tmin ----
+ggplot(final_data_sampled) + aes(x = tmin_orig, y = dep_delay_time) +
+  geom_jitter(color = "#0078D2") +
+  scale_x_continuous(breaks = seq(-30, 30, 10)) +
+  labs(x = "\nTemperatura mínima", y = "Tiempo de retraso en llegada") +
+  tema_graficos
+
+# ---- Noche ----
+final_data_sampled %>% group_by(orig_night, dep_delay) %>% count() %>%
+  ungroup() %>% mutate(porc = n*100/sum(n)) %>% arrange(desc(porc))
+
+final_data_sampled %>% group_by(dest_night, arr_delay) %>% count() %>%
+  ungroup() %>% mutate(porc = n*100/sum(n)) %>% arrange(desc(porc))
+
+# ---- Variables objetivo ----
+# Origen
+ggplot(final_data_sampled) + aes(x = dep_delay, fill = dep_delay) + geom_bar() +
+  geom_text(aes(label = scales::percent(round((..count..)/sum(..count..),2)),
+                y= ((..count..)/sum(..count..))), stat = "count",
+            vjust = -3, color = "white", family = "Calibri", size = 8) +
+  scale_y_continuous(labels = scales::comma, breaks = seq(0, 150000, 25000)) +
+  guides(fill = FALSE) +
+  labs(x = "\nRetraso en la salida", y = "") + tema_graficos + paleta_fill
+
+# Destino
+ggplot(final_data_sampled) + aes(x = arr_delay, fill = arr_delay) + geom_bar() +
+  geom_text(aes(label = scales::percent(round((..count..)/sum(..count..),2)),
+                y= ((..count..)/sum(..count..))), stat = "count",
+            vjust = -3, color = "white", family = "Calibri", size = 8) +
+  scale_y_continuous(labels = scales::comma, breaks = seq(0, 150000, 25000)) +
+  guides(fill = FALSE) +
+  labs(x = "\nRetraso en la llegada", y = "") + tema_graficos + paleta_fill
+
+# Nº vuelos despegan tarde y llegan en hora y
+# Nº vuelos despegan tarde y llegan tarde
+dep_arr_delay <- final_data_sampled %>% group_by(dep_delay, arr_delay) %>%
+  count(dep_delay, arr_delay) %>% ungroup() %>% mutate(porc = 100*n/sum(n))
+
+ggplot(final_data_sampled) + aes(x = dep_delay, y = arr_delay) +
+  geom_count(color = "#0078D2") +
+  # scale_size_continuous(breaks = seq(0, 33600, 5000)) +
+  labs(x = "\nRetraso en la salida",
+       y = "Retraso en la llegada\n",
+       size = "Nº de vuelos") +
+  guides(fill = FALSE) + tema_graficos
